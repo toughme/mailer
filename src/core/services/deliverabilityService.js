@@ -1,4 +1,11 @@
 const dns = require('dns').promises;
+const { execFile } = require('child_process');
+
+const HOSTNAME_REGEX = /^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)*$/;
+
+function isValidHostname(domain) {
+  return HOSTNAME_REGEX.test(domain) && domain.length <= 253;
+}
 
 function logDnsFailure(domain, type, error) {
   console.warn(`DNS ${type} lookup failed for ${domain}: ${error?.message || error}`);
@@ -59,61 +66,54 @@ function scoreConfiguration(payload) {
   };
 }
 
+function nslookupFallback(type, domain) {
+  if (!isValidHostname(domain)) {
+    return [];
+  }
+  return new Promise((resolve) => {
+    execFile('nslookup', [`-type=${type}`, domain], { encoding: 'utf8', timeout: 5000, windowsHide: true }, (error, stdout) => {
+      if (error) {
+        resolve([]);
+        return;
+      }
+      const lines = stdout.split(/\r?\n/);
+      if (type === 'txt') {
+        const records = [];
+        for (const line of lines) {
+          const m = line.match(/"(.*)"/);
+          if (m) records.push(m[1]);
+        }
+        resolve(records);
+      } else if (type === 'mx') {
+        const records = [];
+        for (const line of lines) {
+          const m = line.match(/mail exchanger = (.*)$/i);
+          if (m) records.push(m[1].trim());
+        }
+        resolve(records);
+      } else if (type === 'cname') {
+        const records = [];
+        for (const line of lines) {
+          const m = line.match(/canonical name = (.*)$/i) || line.match(/CNAME\s+(.*)$/i);
+          if (m) records.push(m[1].trim());
+        }
+        resolve(records);
+      } else {
+        resolve([]);
+      }
+    });
+  });
+}
+
 function createDeliverabilityService({ accountsService }) {
-  const { execSync } = require('child_process');
-
-  function nslookupTxt(domain) {
-    try {
-      const out = execSync(`nslookup -type=txt ${domain}`, { encoding: 'utf8', timeout: 5000 });
-      const lines = out.split(/\r?\n/);
-      const records = [];
-      for (const line of lines) {
-        const m = line.match(/\"(.*)\"/);
-        if (m) records.push(m[1]);
-      }
-      return records;
-    } catch (e) {
-      return [];
-    }
-  }
-
-  function nslookupMx(domain) {
-    try {
-      const out = execSync(`nslookup -type=mx ${domain}`, { encoding: 'utf8', timeout: 5000 });
-      const lines = out.split(/\r?\n/);
-      const records = [];
-      for (const line of lines) {
-        const m = line.match(/mail exchanger = (.*)$/i);
-        if (m) records.push(m[1].trim());
-      }
-      return records;
-    } catch (e) {
-      return [];
-    }
-  }
-
-  function nslookupCname(domain) {
-    try {
-      const out = execSync(`nslookup -type=cname ${domain}`, { encoding: 'utf8', timeout: 5000 });
-      const lines = out.split(/\r?\n/);
-      const records = [];
-      for (const line of lines) {
-        const m = line.match(/canonical name = (.*)$/i) || line.match(/CNAME\s+(.*)$/i);
-        if (m) records.push(m[1].trim());
-      }
-      return records;
-    } catch (e) {
-      return [];
-    }
-  }
   async function resolveRecords(domain, type) {
     try {
       return await dns.resolve(domain, type);
     } catch (error) {
       logDnsFailure(domain, type, error);
-      // fallback to nslookup for MX
       if (type === 'MX') {
-        return nslookupMx(domain).map((host) => ({ exchange: host }));
+        const hosts = await nslookupFallback('mx', domain);
+        return hosts.map((host) => ({ exchange: host }));
       }
       return [];
     }
@@ -125,13 +125,17 @@ function createDeliverabilityService({ accountsService }) {
       return records.map((parts) => normalizeTxtRecord(parts.join(''))).filter(Boolean);
     } catch (error) {
       logDnsFailure(domain, 'TXT', error);
-      // fallback to nslookup
-      try {
-        const rows = nslookupTxt(domain);
-        return rows.map((r) => normalizeTxtRecord(r)).filter(Boolean);
-      } catch (e) {
-        return [];
-      }
+      const rows = await nslookupFallback('txt', domain);
+      return rows.map((r) => normalizeTxtRecord(r)).filter(Boolean);
+    }
+  }
+
+  async function resolveCname(domain) {
+    try {
+      return await dns.resolveCname(domain);
+    } catch (error) {
+      logDnsFailure(domain, 'CNAME', error);
+      return nslookupFallback('cname', domain);
     }
   }
 
@@ -148,11 +152,9 @@ function createDeliverabilityService({ accountsService }) {
       let dkimSelector = requestedSelector;
       let dkimRecords = domain ? await resolveTxt(`${dkimSelector}._domainkey.${domain}`) : [];
 
-      // detect provider and pick provider-specific selectors if available
       const provider = detectProviderByMx(mxRecords) || null;
       const providerSelectors = provider?.selectors || [];
 
-      // If no DKIM found for requested selector, try common alternative selectors
       if (domain && (!dkimRecords || dkimRecords.length === 0)) {
         const trySelectors = Array.from(new Set([...(providerSelectors || []), 'default', 'selector1', 'selector2', 'mail', 'smtp', 's1', 's2', 'google', 'amazonses', 'samsung']));
         for (const sel of trySelectors) {
@@ -165,16 +167,9 @@ function createDeliverabilityService({ accountsService }) {
             break;
           }
 
-          // If provider suggests following CNAMEs, try resolving CNAME then resolve TXT at target
           if (provider?.cnameFollow) {
             try {
-              let cnameTargets = [];
-              try {
-                cnameTargets = await dns.resolveCname(selectorDomain);
-              } catch (e) {
-                // fallback to nslookup
-                cnameTargets = nslookupCname(selectorDomain) || [];
-              }
+              const cnameTargets = await resolveCname(selectorDomain);
 
               for (const target of cnameTargets) {
                 const trows = await resolveTxt(target);

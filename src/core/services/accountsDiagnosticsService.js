@@ -241,18 +241,28 @@ function createAccountsDiagnosticsService({ db, security, proxyService, delivera
             if (onProgress) onProgress('SMTP connection verified!');
             console.log(`[Account Test] SMTP verification successful`);
 
-          } else if (protocol === 'graph') {
-            if (!microsoftOauthService) {
-              throw new Error('Microsoft OAuth diagnostics are not configured in the app.');
-            }
-            if (!payload.id) {
-              throw new Error('Graph account diagnostics require a saved account.');
-            }
-            if (onProgress) onProgress('Verifying Microsoft Graph credentials...');
-            console.log(`[Account Test] Verifying Microsoft Graph account ${payload.id}`);
-            await microsoftOauthService.verifyConnection(Number(payload.id));
-            if (onProgress) onProgress('Microsoft Graph account verified!');
-            console.log(`[Account Test] Microsoft Graph verification successful`);
+      } else if (protocol === 'graph') {
+        if (!microsoftOauthService) {
+          throw new Error('Microsoft OAuth diagnostics are not configured in the app.');
+        }
+        if (!payload.id) {
+          throw new Error('Graph account diagnostics require a saved account.');
+        }
+
+        const accountRow = await db.get('SELECT * FROM accounts WHERE id = ?', [Number(payload.id)]);
+        if (!accountRow) {
+          throw new Error('Account not found in database.');
+        }
+        const connStatus = accountRow.connection_status || 'pending';
+        if (connStatus !== 'connected') {
+          throw new Error('Microsoft Graph account is not authorized. Click Authorize to complete OAuth setup.');
+        }
+
+        if (onProgress) onProgress('Verifying Microsoft Graph credentials...');
+        console.log(`[Account Test] Verifying Microsoft Graph account ${payload.id}`);
+        await microsoftOauthService.verifyConnection(Number(payload.id));
+        if (onProgress) onProgress('Microsoft Graph account verified!');
+        console.log(`[Account Test] Microsoft Graph verification successful`);
 
           } else if (protocol === 'imap') {
             if (proxyProfileId) {

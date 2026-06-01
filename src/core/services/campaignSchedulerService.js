@@ -1,6 +1,9 @@
+const MAX_ENQUEUE_RETRIES = 5;
+const MAX_TIMER_DELAY = 2147483647;
+
 function createCampaignSchedulerService({ db, sendQueueService }) {
   const activeTimers = new Map();
-  const failedActivations = new Map(); // Track failed activations for retry
+  const failedActivations = new Map();
 
   function clearTimer(id) {
     const existing = activeTimers.get(id);
@@ -16,22 +19,30 @@ function createCampaignSchedulerService({ db, sendQueueService }) {
       ['active', Number(id)]
     );
     clearTimer(id);
-    failedActivations.delete(id); // Clear failed activation tracking
+    failedActivations.delete(id);
 
     if (sendQueueService) {
       try {
         await sendQueueService.enqueueCampaign(id);
       } catch (error) {
         console.error(`Failed to enqueue campaign ${id}:`, error);
-        
-        // Track failed activation for retry
+
         const failCount = (failedActivations.get(id) || 0) + 1;
         failedActivations.set(id, failCount);
-        
-        // Retry with exponential backoff: 5s, 10s, 20s, 30s
+
+        if (failCount > MAX_ENQUEUE_RETRIES) {
+          console.error(`Campaign ${id} enqueue failed after ${MAX_ENQUEUE_RETRIES} retries - marking as error`);
+          failedActivations.delete(id);
+          await db.run(
+            'UPDATE campaigns SET status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
+            ['error', Number(id)]
+          );
+          return;
+        }
+
         const retryDelay = Math.min(5000 * Math.pow(2, failCount - 1), 30000);
-        console.log(`Retrying campaign ${id} enqueue in ${retryDelay}ms (attempt ${failCount})`);
-        
+        console.log(`Retrying campaign ${id} enqueue in ${retryDelay}ms (attempt ${failCount}/${MAX_ENQUEUE_RETRIES})`);
+
         setTimeout(() => {
           activateCampaign(id).catch((retryError) => {
             console.error(`Retry ${failCount} failed for campaign ${id}:`, retryError);
@@ -62,7 +73,7 @@ function createCampaignSchedulerService({ db, sendQueueService }) {
         continue;
       }
 
-      const delay = targetTime - Date.now();
+      const delay = Math.min(targetTime - Date.now(), MAX_TIMER_DELAY);
       if (delay <= 0) {
         await activateCampaign(campaign.id);
         continue;
@@ -78,9 +89,7 @@ function createCampaignSchedulerService({ db, sendQueueService }) {
     }
   }
 
-  return {
-    sync
-  };
+  return { sync };
 }
 
 module.exports = { createCampaignSchedulerService };

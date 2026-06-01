@@ -1,3 +1,13 @@
+function safeJsonParseArray(value) {
+  if (!value) return [];
+  try {
+    const parsed = JSON.parse(value);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
 function parseMetrics(value) {
   if (!value) {
     return { sent: 0, failed: 0, pending: 0, opens: 0, clicks: 0 };
@@ -40,7 +50,7 @@ function createCampaignsService({ db, schedulerService, sendQueueService }) {
         status: row.status,
         segmentId: row.segment_id,
         segmentName: row.segment_name,
-        recipientIds: row.recipient_ids ? JSON.parse(row.recipient_ids) : [],
+        recipientIds: safeJsonParseArray(row.recipient_ids),
         useIndividualRecipients: Boolean(row.use_individual_recipients),
         scheduledAt: row.scheduled_at,
         metrics: parseMetrics(row.metrics),
@@ -164,21 +174,22 @@ function createCampaignsService({ db, schedulerService, sendQueueService }) {
       return this.list();
     },
 
-    async delete(payload) {
-      const id = Number(payload.id);
+  async delete(payload) {
+    const id = Number(payload.id);
 
-      if (!id) {
-        throw new Error('Campaign id is required.');
-      }
-
-      await db.run('DELETE FROM campaigns WHERE id = ?', [id]);
-
-      if (schedulerService) {
-        await schedulerService.sync();
-      }
-
-      return this.list();
+    if (!id) {
+      throw new Error('Campaign id is required.');
     }
+
+    await db.run('DELETE FROM send_queue WHERE campaign_id = ?', [id]);
+    await db.run('DELETE FROM campaigns WHERE id = ?', [id]);
+
+    if (schedulerService) {
+      await schedulerService.sync();
+    }
+
+    return this.list();
+  }
   };
 }
 

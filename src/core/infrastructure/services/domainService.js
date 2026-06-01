@@ -1,6 +1,13 @@
 const dns = require('dns').promises;
 const https = require('https');
+const { execFile } = require('child_process');
 const { createDomainRecord, createIpPoolRecord } = require('../schemas');
+
+const HOSTNAME_REGEX = /^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)*$/;
+
+function isValidHostname(domain) {
+  return HOSTNAME_REGEX.test(domain) && domain.length <= 253;
+}
 
 async function resolveMx(domain) {
   try {
@@ -10,46 +17,52 @@ async function resolveMx(domain) {
   }
 }
 
+async function nslookupFallback(type, domain) {
+  if (!isValidHostname(domain)) {
+    return [];
+  }
+  return new Promise((resolve) => {
+    execFile('nslookup', [`-type=${type}`, domain], { encoding: 'utf8', timeout: 5000, windowsHide: true }, (error, stdout) => {
+      if (error) {
+        resolve([]);
+        return;
+      }
+      const lines = stdout.split(/\r?\n/);
+      if (type === 'txt') {
+        const records = [];
+        for (const line of lines) {
+          const m = line.match(/"(.*)"/);
+          if (m) records.push(m[1]);
+        }
+        resolve(records.map((r) => normalizeTxtRecord(r)).filter(Boolean));
+      } else if (type === 'cname') {
+        const records = [];
+        for (const line of lines) {
+          const m = line.match(/canonical name = (.*)$/i) || line.match(/CNAME\s+(.*)$/i);
+          if (m) records.push(m[1].trim());
+        }
+        resolve(records);
+      } else {
+        resolve([]);
+      }
+    });
+  });
+}
+
 async function resolveTxt(domain) {
   try {
     const rows = await dns.resolveTxt(domain);
     return rows.map((parts) => normalizeTxtRecord(parts.join(''))).filter(Boolean);
   } catch (error) {
     console.warn(`DNS TXT lookup failed for ${domain}: ${error?.message || error}`);
-    // fallback to nslookup parsing
-    try {
-      const { execSync } = require('child_process');
-      const out = execSync(`nslookup -type=txt ${domain}`, { encoding: 'utf8', timeout: 5000 });
-      const lines = out.split(/\r?\n/);
-      const records = [];
-      for (const line of lines) {
-        const m = line.match(/\"(.*)\"/);
-        if (m) records.push(m[1]);
-      }
-      return records.map((r) => normalizeTxtRecord(r)).filter(Boolean);
-    } catch (e) {
-      return [];
-    }
+    return nslookupFallback('txt', domain);
   }
 }
 async function resolveCname(domain) {
   try {
     return await dns.resolveCname(domain);
   } catch (error) {
-    // fallback to nslookup
-    try {
-      const { execSync } = require('child_process');
-      const out = execSync(`nslookup -type=cname ${domain}`, { encoding: 'utf8', timeout: 5000 });
-      const lines = out.split(/\r?\n/);
-      const records = [];
-      for (const line of lines) {
-        const m = line.match(/canonical name = (.*)$/i) || line.match(/CNAME\s+(.*)$/i);
-        if (m) records.push(m[1].trim());
-      }
-      return records;
-    } catch (e) {
-      return [];
-    }
+    return nslookupFallback('cname', domain);
   }
 }
 async function resolveA(domain) {
@@ -101,14 +114,22 @@ function normalizeDomainRow(row) {
   };
 }
 
+function safeJsonParse(value, fallback) {
+  try {
+    return JSON.parse(value || '');
+  } catch {
+    return fallback;
+  }
+}
+
 function normalizeIpPoolRow(row) {
   return {
     id: row.id,
     name: row.name,
     provider: row.provider,
     status: row.status,
-    ips: JSON.parse(row.ips || '[]'),
-    assignedDomains: JSON.parse(row.assigned_domains || '[]'),
+    ips: safeJsonParse(row.ips, []),
+    assignedDomains: safeJsonParse(row.assigned_domains, []),
     notes: row.notes,
     createdAt: row.created_at,
     updatedAt: row.updated_at

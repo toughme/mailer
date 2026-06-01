@@ -1,4 +1,4 @@
-const { app, BrowserWindow, Menu, ipcMain, shell, screen } = require('electron');
+const { app, BrowserWindow, Menu, ipcMain, shell, screen, session } = require('electron');
 const fs = require('fs');
 const path = require('path');
 const os = require('os');
@@ -80,6 +80,24 @@ function saveWindowState(window) {
 }
 
 function createWindow() {
+  session.defaultSession.webRequest.onHeadersReceived((details, callback) => {
+    callback({
+      responseHeaders: {
+        ...details.responseHeaders,
+        'Content-Security-Policy': [
+          "default-src 'self' 'unsafe-inline' data: blob:; " +
+          "script-src 'self' 'unsafe-inline' 'unsafe-eval'; " +
+          "connect-src 'self' https:; " +
+          "img-src 'self' data: blob: https:; " +
+          "style-src 'self' 'unsafe-inline'; " +
+          "font-src 'self' data:; " +
+          "object-src 'none'; " +
+          "base-uri 'self';"
+        ]
+      }
+    });
+  });
+
   const primaryDisplay = screen.getPrimaryDisplay();
   const { width: screenWidth, height: screenHeight } = primaryDisplay.workAreaSize;
 

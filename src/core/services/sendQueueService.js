@@ -40,7 +40,8 @@ function createSendQueueService({
     if (campaign.use_individual_recipients) {
       let selectedIds = [];
       try {
-        selectedIds = campaign.recipient_ids ? JSON.parse(campaign.recipient_ids) : [];
+        const parsed = JSON.parse(campaign.recipient_ids || '[]');
+        selectedIds = Array.isArray(parsed) ? parsed : [];
       } catch {
         selectedIds = [];
       }
@@ -50,20 +51,35 @@ function createSendQueueService({
 
     if (!campaign.use_individual_recipients && campaign.segment_id) {
       const segment = await db.get('SELECT * FROM segments WHERE id = ?', [campaign.segment_id]);
-      if (segment) {
-        const filters = segment.filters ? JSON.parse(segment.filters) : {};
+    if (segment) {
+      let filters = {};
+      try {
+        filters = JSON.parse(segment.filters || '{}');
+        if (!filters || typeof filters !== 'object' || Array.isArray(filters)) filters = {};
+      } catch {
+        filters = {};
+      }
         recipients = await segmentsService.preview(filters);
         const ids = new Set(recipients.map((item) => item.id));
         const fullRows = await db.all('SELECT * FROM recipients WHERE status = ?', ['active']);
         recipients = fullRows
           .filter((row) => ids.has(row.id))
-          .map((row) => ({
-            id: row.id,
-            email: row.email,
-            name: row.name,
-            tags: row.tags ? JSON.parse(row.tags) : [],
-            status: row.status
-          }));
+          .map((row) => {
+            let tags = [];
+            try {
+              const parsed = JSON.parse(row.tags || '[]');
+              tags = Array.isArray(parsed) ? parsed : [];
+            } catch {
+              tags = [];
+            }
+            return {
+              id: row.id,
+              email: row.email,
+              name: row.name,
+              tags,
+              status: row.status
+            };
+          });
       }
     }
 
@@ -460,9 +476,16 @@ function createSendQueueService({
             const delay = sendSettingsService.computeDelay(settings);
             await sleep(delay);
           }
-        } catch (error) {
-          console.error('Send worker error:', error);
-        } finally {
+  } catch (error) {
+    console.error('Send worker error:', error);
+    if (eventLogService) {
+      await eventLogService.record({
+        eventType: 'worker-error',
+        category: 'system',
+        metadata: { error: error.message || 'Unknown worker error' }
+      }).catch(() => {});
+    }
+  } finally {
           workerRunning = false;
         }
       };

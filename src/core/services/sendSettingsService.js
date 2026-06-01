@@ -175,28 +175,29 @@ function createSendSettingsService({ db }) {
       return Math.max(min, Math.round(base + jitter));
     },
 
-    getWarmupCap(totalSent, settings) {
-      if (!settings.warmupEnabled) {
-        return Number(settings.dailyCapPerAccount) || 80;
-      }
-      const sent = Number(totalSent) || 0;
-      if (sent < 1500) {
-        return 50;
-      }
-      if (sent < 3500) {
-        return 150;
-      }
-      if (sent < 7000) {
-        return 500;
-      }
-      if (sent < 15000) {
-        return 1500;
-      }
-      if (sent < 30000) {
-        return 5000;
-      }
-      return Number(settings.dailyCapPerAccount) || 80;
+  getWarmupCap(totalSent, settings) {
+    const dailyCap = Number(settings.dailyCapPerAccount) || 80;
+    if (!settings.warmupEnabled) {
+      return dailyCap;
     }
+    const sent = Number(totalSent) || 0;
+    if (sent < 1500) {
+      return 50;
+    }
+    if (sent < 3500) {
+      return 150;
+    }
+    if (sent < 7000) {
+      return 500;
+    }
+    if (sent < 15000) {
+      return 1500;
+    }
+    if (sent < 30000) {
+      return 5000;
+    }
+    return Math.max(dailyCap, 5000);
+  }
   };
 }
 

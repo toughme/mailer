@@ -186,7 +186,7 @@ function mapSettings(row, security) {
     provider,
     providerLabel: preset.label,
     hasApiKey: Boolean(decrypted || getEnvApiKey(provider)),
-    apiKeyPreview: decrypted ? `${decrypted.slice(0, 6)}...${decrypted.slice(-4)}` : '',
+    apiKeyPreview: decrypted ? `***${decrypted.slice(-3)}` : '',
     model: row?.model || preset.model || 'meta/llama-3.2-3b-instruct',
     baseUrl: row?.base_url || preset.baseUrl || 'https://integrate.api.nvidia.com/v1',
     systemPrompt: row?.system_prompt || DEFAULT_SYSTEM_PROMPT
@@ -234,9 +234,9 @@ function createAiRewriteService({ db, security }) {
       if (!model) {
         throw new Error('AI model is required.');
       }
-      if (!/^https?:\/\//i.test(baseUrl)) {
-        throw new Error('AI base URL must start with http:// or https://.');
-      }
+    if (!/^https:\/\//i.test(baseUrl)) {
+      throw new Error('AI base URL must use HTTPS.');
+    }
 
       await db.run(
         `UPDATE ai_settings
@@ -348,9 +348,9 @@ function createAiRewriteService({ db, security }) {
 
       const baseUrl = String(payload.baseUrl ?? row.base_url ?? preset.baseUrl ?? '').trim().replace(/\/+$/, '');
       const model = String(payload.model ?? row.model ?? preset.model ?? '').trim();
-      if (!model || !/^https?:\/\//i.test(baseUrl)) {
-        throw new Error('A valid base URL and model are required before testing.');
-      }
+    if (!model || !/^https:\/\//i.test(baseUrl)) {
+      throw new Error('A valid HTTPS base URL and model are required before testing.');
+    }
 
       const startedAt = Date.now();
       const reply = await this.callAiApi(

@@ -86,11 +86,11 @@ function createSendPreflightService({ db, deliverabilityService }) {
       }
 
       const contentScan = await scanCampaignContent(campaign, settings);
-      const accounts = await db.all(
-        `SELECT email FROM accounts
-         WHERE (primary_protocol = 'smtp' AND encrypted_password != '')
-            OR (primary_protocol = 'graph' AND oauth_refresh_token != '')`
-      );
+    const accounts = await db.all(
+      `SELECT email, primary_protocol, connection_status FROM accounts
+      WHERE (primary_protocol = 'smtp' AND encrypted_password != '')
+      OR (primary_protocol = 'graph' AND connection_status = 'connected')`
+    );
 
       const domains = [...new Set(accounts.map((row) => extractDomain(row.email)).filter(Boolean))];
       const dnsChecks = [];
@@ -147,7 +147,7 @@ function createSendPreflightService({ db, deliverabilityService }) {
 
     async getAccountAuthHealth() {
       const accounts = await db.all(
-        `SELECT id, email, provider, primary_protocol FROM accounts ORDER BY created_at DESC`
+        `SELECT id, email, provider, primary_protocol, connection_status FROM accounts ORDER BY created_at DESC`
       );
 
       const results = [];
@@ -156,6 +156,7 @@ function createSendPreflightService({ db, deliverabilityService }) {
         const domain = extractDomain(account.email);
 
         if (protocol === 'graph') {
+          const connStatus = account.connection_status || 'pending';
           results.push({
             id: account.id,
             email: account.email,
@@ -164,9 +165,13 @@ function createSendPreflightService({ db, deliverabilityService }) {
             spf: true,
             dkim: true,
             dmarc: true,
-            authOk: true,
+            authOk: connStatus === 'connected',
             providerManaged: true,
-            note: 'Microsoft Graph accounts use OAuth and are provider managed.'
+            note: connStatus === 'connected'
+              ? 'Microsoft Graph account connected via OAuth.'
+              : connStatus === 'pending'
+                ? 'Microsoft Graph account needs OAuth authorization.'
+                : `Microsoft Graph account status: ${connStatus}`
           });
           continue;
         }

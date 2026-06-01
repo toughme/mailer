@@ -1,5 +1,4 @@
 const crypto = require('crypto');
-const http = require('http');
 const https = require('https');
 
 function parseJson(value, fallback) {
@@ -25,6 +24,42 @@ function normalizeEndpoint(row) {
   };
 }
 
+function validateWebhookUrl(url) {
+  let parsed;
+  try {
+    parsed = new URL(url);
+  } catch {
+    throw new Error('Webhook URL is not a valid URL.');
+  }
+
+  if (parsed.protocol !== 'https:') {
+    throw new Error('Webhook URL must use HTTPS.');
+  }
+
+  const hostname = parsed.hostname.toLowerCase();
+  const blockedPatterns = [
+    /^127\./,
+    /^10\./,
+    /^172\.(1[6-9]|2\d|3[01])\./,
+    /^192\.168\./,
+    /^169\.254\./,
+    /^0\./,
+    /^localhost$/i,
+    /\.local$/i,
+    /\.internal$/i,
+    /^fc00:/i,
+    /^fe80:/i,
+    /^::1$/i,
+    /^fd/i
+  ];
+
+  for (const pattern of blockedPatterns) {
+    if (pattern.test(hostname)) {
+      throw new Error('Webhook URL must point to a public internet address.');
+    }
+  }
+}
+
 function postJson(url, payload, secret) {
   return new Promise((resolve, reject) => {
     const target = new URL(url);
@@ -32,12 +67,11 @@ function postJson(url, payload, secret) {
     const signature = secret
       ? crypto.createHmac('sha256', secret).update(body).digest('hex')
       : '';
-    const client = target.protocol === 'https:' ? https : http;
-    const request = client.request(
+    const request = https.request(
       {
         method: 'POST',
         hostname: target.hostname,
-        port: target.port || (target.protocol === 'https:' ? 443 : 80),
+        port: target.port || 443,
         path: `${target.pathname}${target.search}`,
         timeout: 10000,
         headers: {
@@ -49,6 +83,7 @@ function postJson(url, payload, secret) {
       (response) => {
         response.resume();
         response.on('end', () => resolve(response.statusCode));
+        response.on('error', () => resolve(response.statusCode));
       }
     );
     request.on('timeout', () => {
@@ -60,7 +95,7 @@ function postJson(url, payload, secret) {
   });
 }
 
-function createWebhookService({ db }) {
+function createWebhookService({ db, security }) {
   return {
     async list() {
       const rows = await db.all('SELECT * FROM webhook_endpoints ORDER BY created_at DESC');
@@ -78,16 +113,20 @@ function createWebhookService({ db }) {
         throw new Error('Webhook name and URL are required.');
       }
 
+      validateWebhookUrl(url);
+
+      const encryptedSecret = secret && security ? security.encrypt(secret) : '';
+
       await db.run(
         `INSERT INTO webhook_endpoints (name, url, events, secret, status, updated_at)
-         VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
-         ON CONFLICT(name) DO UPDATE SET
-           url = excluded.url,
-           events = excluded.events,
-           secret = CASE WHEN excluded.secret != '' THEN excluded.secret ELSE webhook_endpoints.secret END,
-           status = excluded.status,
-           updated_at = CURRENT_TIMESTAMP`,
-        [name, url, JSON.stringify(events), secret, status]
+        VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+        ON CONFLICT(name) DO UPDATE SET
+        url = excluded.url,
+        events = excluded.events,
+        secret = CASE WHEN excluded.secret != '' THEN excluded.secret ELSE webhook_endpoints.secret END,
+        status = excluded.status,
+        updated_at = CURRENT_TIMESTAMP`,
+        [name, url, JSON.stringify(events), encryptedSecret, status]
       );
 
       return this.list();
@@ -100,29 +139,34 @@ function createWebhookService({ db }) {
 
     async dispatch(event) {
       const rows = await db.all('SELECT * FROM webhook_endpoints WHERE status = ?', ['active']);
-      for (const row of rows) {
+
+      const dispatches = rows.map(async (row) => {
         const events = parseJson(row.events, []);
         if (events.length && !events.includes(event.eventType)) {
-          continue;
+          return;
         }
 
+        const decryptedSecret = row.secret && security ? security.decrypt(row.secret) : '';
+
         try {
-          const statusCode = await postJson(row.url, { event }, row.secret);
+          const statusCode = await postJson(row.url, { event }, decryptedSecret);
           await db.run(
             `UPDATE webhook_endpoints
-             SET last_status = ?, last_error = '', last_delivered_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP
-             WHERE id = ?`,
+            SET last_status = ?, last_error = '', last_delivered_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP
+            WHERE id = ?`,
             [String(statusCode), row.id]
           );
         } catch (error) {
           await db.run(
             `UPDATE webhook_endpoints
-             SET last_error = ?, updated_at = CURRENT_TIMESTAMP
-             WHERE id = ?`,
+            SET last_error = ?, updated_at = CURRENT_TIMESTAMP
+            WHERE id = ?`,
             [error.message || 'Webhook delivery failed.', row.id]
           );
         }
-      }
+      });
+
+      await Promise.allSettled(dispatches);
     }
   };
 }

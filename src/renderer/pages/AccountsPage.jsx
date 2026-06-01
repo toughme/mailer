@@ -93,17 +93,27 @@ function AccountsPage() {
 
   async function handleAuthorize(accountId) {
     try {
-      startProcess('Authorizing Microsoft Graph', { message: 'Opening authentication window...' });
+      startProcess('Authorizing Microsoft Graph', { message: 'Opening authentication window... A browser window will open for you to sign in to Microsoft.' });
       setAuthorizingAccountId(accountId);
-      await desktopInvoke('accounts:graph-authorize', { id: accountId });
+      const result = await desktopInvoke('accounts:graph-authorize', { id: accountId });
       completeProcess('Microsoft Graph authorization completed');
       setError('');
-      setTestResult('Microsoft Graph account authorized successfully.');
+      setTestResult(result.connected
+        ? `Microsoft Graph account authorized successfully. Connected as ${result.email || 'user'}.`
+        : 'Microsoft Graph account authorized successfully.'
+      );
       await loadAccounts();
       await loadAuthHealth();
     } catch (authorizeError) {
-      completeProcess('Microsoft Graph authorization failed');
-      setError(authorizeError.message);
+      const isCancelled = authorizeError.message?.includes('cancelled');
+      completeProcess(isCancelled ? 'Authorization cancelled' : 'Microsoft Graph authorization failed');
+      if (isCancelled) {
+        setError('Microsoft authorization was cancelled. Click Authorize to try again.');
+        setTestResult('');
+      } else {
+        setError(authorizeError.message);
+        setTestResult('');
+      }
     } finally {
       setAuthorizingAccountId(null);
     }
@@ -357,16 +367,28 @@ function AccountsPage() {
                       {auth.providerManaged ? 'managed' : auth.authOk ? 'auth ok' : 'auth fix'}
                     </span>
                   ) : null}
+                  {account.primaryProtocol === 'graph' ? (
+                    <span className={`pill ${account.connectionStatus === 'connected' ? 'pill-pass' : account.connectionStatus === 'pending' ? 'pill-review' : 'pill-fail'}`}>
+                      {account.connectionStatus === 'connected' ? 'graph ok' : account.connectionStatus === 'pending' ? 'auth needed' : account.connectionStatus === 'connecting' ? 'connecting' : 're-auth'}
+                    </span>
+                  ) : null}
                   {test ? (
                     <span className={`pill ${test.ok ? 'pill-pass' : 'pill-fail'}`} title={test.message}>
                       {test.ok ? 'connected' : 'failed'}
                     </span>
                   ) : null}
                   <div className="button-row">
-                    {account.primaryProtocol === 'graph' && !account.hasOAuth ? (
+                    {account.primaryProtocol === 'graph' && account.connectionStatus !== 'connected' ? (
                       <Tooltip label="Authorize Microsoft Graph">
                         <button className="ghost-button sm" type="button" onClick={() => handleAuthorize(account.id)} disabled={authorizingAccountId === account.id}>
                           {authorizingAccountId === account.id ? 'Authorizing…' : 'Authorize'}
+                        </button>
+                      </Tooltip>
+                    ) : null}
+                    {account.primaryProtocol === 'graph' && account.connectionStatus === 'connected' ? (
+                      <Tooltip label="Re-authorize Microsoft Graph">
+                        <button className="ghost-button sm" type="button" onClick={() => handleAuthorize(account.id)} disabled={authorizingAccountId === account.id}>
+                          {authorizingAccountId === account.id ? 'Authorizing…' : 'Re-auth'}
                         </button>
                       </Tooltip>
                     ) : null}

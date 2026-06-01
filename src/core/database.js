@@ -311,6 +311,7 @@ async function initializeDatabase(baseDataDir) {
   await addColumnIfMissing(manager, 'accounts', 'oauth_scope', "TEXT DEFAULT ''");
   await addColumnIfMissing(manager, 'accounts', 'oauth_token_type', "TEXT DEFAULT ''");
   await addColumnIfMissing(manager, 'accounts', 'proxy_profile_id', 'INTEGER');
+  await addColumnIfMissing(manager, 'accounts', 'connection_status', "TEXT DEFAULT 'pending'");
   await addColumnIfMissing(manager, 'campaigns', 'subject_b', "TEXT DEFAULT ''");
   await addColumnIfMissing(manager, 'campaigns', 'content_b', "TEXT DEFAULT ''");
   await addColumnIfMissing(manager, 'campaigns', 'ab_enabled', 'INTEGER DEFAULT 0');

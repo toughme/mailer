@@ -37,24 +37,19 @@ module.exports = (env, argv) => {
     },
     target: 'web',
     mode: argv.mode || 'development',
-    optimization: {
-      minimize: isProduction,
-      minimizer: isProduction ? [
-        new TerserPlugin({
-          terserOptions: {
-            compress: {
-              drop_console: true,
-              drop_debugger: true
-            },
-            mangle: {
-              properties: {
-                regex: /^_[A-Za-z]/
-              }
-            }
+  optimization: {
+    minimize: isProduction,
+    minimizer: isProduction ? [
+      new TerserPlugin({
+        terserOptions: {
+          compress: {
+            drop_console: true,
+            drop_debugger: true
           }
-        })
-      ] : []
-    },
+        }
+      })
+    ] : []
+  },
     plugins: []
   };
 };

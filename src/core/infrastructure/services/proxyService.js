@@ -2,6 +2,17 @@ const net = require('net');
 
 const ALLOWED_PROXY_TYPES = new Set(['http', 'https', 'socks', 'socks4', 'socks5']);
 
+const HOST_REGEX = /^[a-zA-Z0-9]([a-zA-Z0-9\-.*]{0,61}[a-zA-Z0-9])?(\.[a-zA-Z0-9]([a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])?)*$/;
+
+function isValidHost(host) {
+  if (!host || typeof host !== 'string') return false;
+  if (/^\d{1,3}(\.\d{1,3}){3}$/.test(host)) {
+    const parts = host.split('.').map(Number);
+    return parts.every((p) => p >= 0 && p <= 255);
+  }
+  return HOST_REGEX.test(host);
+}
+
 function sanitizeType(type) {
   const value = String(type || 'http').trim().toLowerCase();
   return ALLOWED_PROXY_TYPES.has(value) ? value : 'http';
@@ -55,9 +66,17 @@ function createProxyService({ db, security }) {
       const status = ['active', 'paused'].includes(payload.status) ? payload.status : 'active';
       const notes = String(payload.notes || '').trim();
 
-      if (!name || !host || !port) {
-        throw new Error('Proxy name, host, and port are required.');
-      }
+    if (!name || !host || !port) {
+      throw new Error('Proxy name, host, and port are required.');
+    }
+
+    if (!isValidHost(host)) {
+      throw new Error('Invalid proxy host.');
+    }
+
+    if (port < 1 || port > 65535) {
+      throw new Error('Proxy port must be between 1 and 65535.');
+    }
 
       await db.run(
         `INSERT INTO proxy_profiles
@@ -112,9 +131,13 @@ function createProxyService({ db, security }) {
 
     async test(id) {
       const proxy = await db.get('SELECT * FROM proxy_profiles WHERE id = ?', [Number(id)]);
-      if (!proxy) {
-        throw new Error('Proxy profile not found.');
-      }
+    if (!proxy) {
+      throw new Error('Proxy profile not found.');
+    }
+
+    if (!isValidHost(proxy.host)) {
+      throw new Error('Invalid proxy host — cannot test connection.');
+    }
 
       const startedAt = Date.now();
       await new Promise((resolve, reject) => {
