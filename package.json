@@ -13,7 +13,7 @@
     "clean:windows-build": "powershell -NoProfile -Command \"Get-Process -Name 'PhantomMailer 2026' -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue; Remove-Item -Recurse -Force dist -ErrorAction SilentlyContinue; exit 0\"",
     "stop:windows-app": "taskkill /IM \"PhantomMailer 2026.exe\" /F || echo no running app",
     "build:electron:win": "npm run build:win-packager",
-    "build:win-packager": "npm run clean:windows-build && npm run build:prod && electron-packager . \"PhantomMailer 2026\" --platform=win32 --arch=x64 --out=dist --overwrite --asar --asar-unpack-dir=node_modules --prune=true --ignore=\"^dist$\" --ignore=\"^dist[\\\\/]\" --ignore=\"^\\.git$\" --ignore=\"^\\.vscode$\" --ignore=\"^\\.env$\"",
+    "build:win-packager": "npm run clean:windows-build && npm run build:prod && electron-packager . \"PhantomMailer 2026\" --platform=win32 --arch=x64 --out=dist --overwrite --asar --asar-unpack-dir=node_modules/sql.js --prune=true --ignore=\"^dist$\" --ignore=\"^dist[\\\\/]\" --ignore=\"^\\.git$\" --ignore=\"^\\.vscode$\" --ignore=\"^\\.env$\"",
     "build:win-installer": "npm run build:win-packager && node scripts/build-windows-installer.js",
     "test": "echo \"No tests configured yet\""
   },

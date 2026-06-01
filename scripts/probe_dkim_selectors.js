@@ -1,46 +1,65 @@
-const { execSync } = require('child_process');
+const { execFileSync } = require('child_process');
+
+const HOSTNAME_REGEX = /^[a-zA-Z0-9]([a-zA-Z0-9\-.*]{0,61}[a-zA-Z0-9])?(\.[a-zA-Z0-9]([a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])?)*$/;
+
+function isValidHost(host) {
+  if (!host || typeof host !== 'string') return false;
+  if (/^\d{1,3}(\.\d{1,3}){3}$/.test(host)) {
+    const parts = host.split('.').map(Number);
+    return parts.every((p) => p >= 0 && p <= 255);
+  }
+  return HOSTNAME_REGEX.test(host);
+}
+
+function nslookup(args) {
+  try {
+    return execFileSync('nslookup', args, {
+      encoding: 'utf8',
+      timeout: 5000,
+      windowsHide: true
+    });
+  } catch {
+    return '';
+  }
+}
 
 function nslookupTxt(name) {
-  try {
-    const out = execSync(`nslookup -type=txt ${name}`, { encoding: 'utf8', timeout: 5000 });
-    const lines = out.split(/\r?\n/);
-    const records = [];
-    for (const line of lines) {
-      const m = line.match(/"(.*)"/);
-      if (m) records.push(m[1]);
-    }
-    return records;
-  } catch (e) {
-    return [];
+  if (!isValidHost(name)) return [];
+  const out = nslookup(['-type=txt', name]);
+  const lines = out.split(/\r?\n/);
+  const records = [];
+  for (const line of lines) {
+    const m = line.match(/"(.*)"/) || line.match(/text\s*=\s*(.+)/i);
+    if (m) records.push(m[1].trim());
   }
+  return records;
 }
 
 function nslookupCname(name) {
-  try {
-    const out = execSync(`nslookup -type=cname ${name}`, { encoding: 'utf8', timeout: 5000 });
-    const lines = out.split(/\r?\n/);
-    const records = [];
-    for (const line of lines) {
-      const m = line.match(/canonical name = (.*)$/i);
-      if (m) records.push(m[1].trim());
-    }
-    return records;
-  } catch (e) {
-    return [];
+  if (!isValidHost(name)) return [];
+  const out = nslookup(['-type=cname', name]);
+  const lines = out.split(/\r?\n/);
+  const records = [];
+  for (const line of lines) {
+    const m = line.match(/canonical name = (.*)$/i)
+      || line.match(/CNAME\s+(.*)$/i)
+      || line.match(/Aliases?:\s+(.*)$/i);
+    if (m) records.push(m[1].trim());
   }
+  return records;
 }
 
 function nslookupMx(domain) {
-  try {
-    const out = execSync(`nslookup -type=mx ${domain}`, { encoding: 'utf8', timeout: 5000 });
-    const lines = out.split(/\r?\n/);
-    const records = [];
-    for (const line of lines) {
-      const m = line.match(/mail exchanger = (.*)$/i);
-      if (m) records.push(m[1].trim());
-    }
-    return records;
-  } catch (e) { return []; }
+  if (!isValidHost(domain)) return [];
+  const out = nslookup(['-type=mx', domain]);
+  const lines = out.split(/\r?\n/);
+  const records = [];
+  for (const line of lines) {
+    const m = line.match(/mail exchanger = (.*)$/i)
+      || line.match(/MX\s+preference\s*=\s*\d+,\s*mail exchanger\s*=\s*(.*)$/i);
+    if (m) records.push(m[1].trim());
+  }
+  return records;
 }
 
 async function probe(domain) {
@@ -67,7 +86,6 @@ async function probe(domain) {
 
   console.log('Also probing common provider CNAME patterns (example):');
   const patterns = [
-    // Microsoft/Office365 often uses selector1._domainkey.domain -> selector1-domain-com._domainkey.<tenant>.onmicrosoft.com or similar
     `selector1._domainkey.${domain}`,
     `selector2._domainkey.${domain}`
   ];

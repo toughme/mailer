@@ -7,15 +7,23 @@ const env = { ...process.env };
 
 delete env.ELECTRON_RUN_AS_NODE;
 
+const isWin32 = process.platform === 'win32';
+
 const child = spawn(electronBinary, [projectRoot], {
   cwd: projectRoot,
   stdio: 'inherit',
-  env
+  env,
+  shell: isWin32,
+  windowsHide: true
 });
 
 child.on('exit', (code, signal) => {
   if (signal) {
-    process.kill(process.pid, signal);
+    if (isWin32) {
+      process.exit(1);
+    } else {
+      process.kill(process.pid, signal);
+    }
     return;
   }
 

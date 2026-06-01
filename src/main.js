@@ -11,9 +11,9 @@ let mainWindow = null;
 let runtime = null;
 
 if (!app.isPackaged && isDevelopment) {
-  const devUserDataPath = path.resolve(__dirname, '..', 'data', 'desktop');
-  fs.mkdirSync(devUserDataPath, { recursive: true });
-  app.setPath('userData', devUserDataPath);
+const devUserDataPath = path.resolve(__dirname, '..', 'data', 'desktop');
+fs.mkdirSync(devUserDataPath, { recursive: true });
+app.setPath('userData', devUserDataPath);
 }
 
 app.commandLine.appendSwitch('disable-gpu');
@@ -23,12 +23,6 @@ app.commandLine.appendSwitch('disable-gpu-sandbox');
 app.commandLine.appendSwitch('disable-accelerated-2d-canvas');
 app.commandLine.appendSwitch('disk-cache-dir', path.join(os.tmpdir(), 'phantom-electron-cache'));
 app.disableHardwareAcceleration();
-
-if (!app.isPackaged && isDevelopment) {
-  const devUserDataPath = path.resolve(__dirname, '..', 'data', 'desktop');
-  fs.mkdirSync(devUserDataPath, { recursive: true });
-  app.setPath('userData', devUserDataPath);
-}
 
 const gotSingleInstanceLock = app.requestSingleInstanceLock();
 

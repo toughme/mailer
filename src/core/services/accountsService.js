@@ -9,10 +9,16 @@ function extractDomain(email) {
 
 function runPythonLookup(email) {
   const scriptPath = path.resolve(__dirname, '..', '..', '..', 'scripts', 'dns_auth_lookup.py');
-  const commands = [
-    { command: 'python', args: [scriptPath, email] },
-    { command: 'py', args: ['-3', scriptPath, email] }
-  ];
+  const commands = process.platform === 'win32'
+    ? [
+        { command: 'py', args: ['-3', scriptPath, email] },
+        { command: 'python', args: [scriptPath, email] },
+        { command: 'python3', args: [scriptPath, email] }
+      ]
+    : [
+        { command: 'python3', args: [scriptPath, email] },
+        { command: 'python', args: [scriptPath, email] }
+      ];
 
   function attempt(index) {
     if (index >= commands.length) {

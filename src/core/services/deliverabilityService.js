@@ -80,21 +80,22 @@ function nslookupFallback(type, domain) {
       if (type === 'txt') {
         const records = [];
         for (const line of lines) {
-          const m = line.match(/"(.*)"/);
-          if (m) records.push(m[1]);
-        }
-        resolve(records);
-      } else if (type === 'mx') {
-        const records = [];
-        for (const line of lines) {
-          const m = line.match(/mail exchanger = (.*)$/i);
-          if (m) records.push(m[1].trim());
-        }
-        resolve(records);
-      } else if (type === 'cname') {
-        const records = [];
-        for (const line of lines) {
-          const m = line.match(/canonical name = (.*)$/i) || line.match(/CNAME\s+(.*)$/i);
+      const m = line.match(/"(.*)"/) || line.match(/text\s*=\s*(.+)/i);
+      if (m) records.push(m[1]);
+    }
+    resolve(records);
+  } else if (type === 'mx') {
+    const records = [];
+    for (const line of lines) {
+      const m = line.match(/mail exchanger = (.*)$/i)
+        || line.match(/MX\s+preference\s*=\s*\d+,\s*mail exchanger\s*=\s*(.*)$/i);
+      if (m) records.push(m[1].trim());
+    }
+    resolve(records);
+  } else if (type === 'cname') {
+    const records = [];
+    for (const line of lines) {
+      const m = line.match(/canonical name = (.*)$/i) || line.match(/CNAME\s+(.*)$/i) || line.match(/Aliases?:\s+(.*)$/i);
           if (m) records.push(m[1].trim());
         }
         resolve(records);
