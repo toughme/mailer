@@ -1,0 +1,53 @@
+{
+  "name": "phantom-mailer",
+  "version": "1.0.0",
+  "description": "PhantomMailer desktop application with Electron, React, and local runtime services.",
+  "author": "PhantomMailer Team <support@phantommailer.local>",
+  "main": "src/main.js",
+  "homepage": "./",
+  "scripts": {
+    "dev": "npm run build:renderer && node scripts/start-electron.js",
+    "start": "npm run dev",
+    "build:renderer": "webpack --config webpack.config.js --mode=development",
+    "build:prod": "webpack --config webpack.config.js --mode=production",
+    "clean:windows-build": "powershell -NoProfile -Command \"Get-Process -Name 'PhantomMailer 2026' -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue; Remove-Item -Recurse -Force dist -ErrorAction SilentlyContinue; exit 0\"",
+    "stop:windows-app": "taskkill /IM \"PhantomMailer 2026.exe\" /F || echo no running app",
+    "build:electron:win": "npm run build:win-packager",
+    "build:win-packager": "npm run clean:windows-build && npm run build:prod && electron-packager . \"PhantomMailer 2026\" --platform=win32 --arch=x64 --out=dist --overwrite --asar --asar-unpack-dir=node_modules --prune=true --ignore=\"^dist$\" --ignore=\"^dist[\\\\/]\" --ignore=\"^\\.git$\" --ignore=\"^\\.vscode$\" --ignore=\"^\\.env$\"",
+    "build:win-installer": "npm run build:win-packager && node scripts/build-windows-installer.js",
+    "test": "echo \"No tests configured yet\""
+  },
+  "dependencies": {
+    "@tiptap/core": "^3.23.6",
+    "@tiptap/extension-color": "^3.23.6",
+    "@tiptap/extension-highlight": "^3.23.6",
+    "@tiptap/extension-image": "^3.23.6",
+    "@tiptap/extension-link": "^3.23.6",
+    "@tiptap/extension-text-align": "^3.23.6",
+    "@tiptap/extension-text-style": "^3.23.6",
+    "@tiptap/react": "^3.23.6",
+    "@tiptap/starter-kit": "^3.23.6",
+    "imap": "^0.8.17",
+    "imap-simple": "^1.6.3",
+    "nodemailer": "^8.0.7",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "react-router-dom": "^6.14.1",
+    "sql.js": "^1.13.0"
+  },
+  "devDependencies": {
+    "@babel/core": "^7.24.3",
+    "@babel/preset-env": "^7.24.3",
+    "@babel/preset-react": "^7.24.3",
+    "babel-loader": "^9.1.4",
+    "css-loader": "^6.9.4",
+    "electron": "^42.0.1",
+    "electron-packager": "^17.1.2",
+    "electron-rebuild": "^3.2.9",
+    "electron-winstaller": "^5.0.0",
+    "style-loader": "^3.3.3",
+    "terser-webpack-plugin": "^5.3.9",
+    "webpack": "^5.88.2",
+    "webpack-cli": "^5.1.4"
+  }
+}
