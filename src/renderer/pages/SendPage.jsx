@@ -234,14 +234,46 @@ function SendPage() {
                   </div>
                 ) : null}
               </label>
-              <label className="checkbox-row compact-check">
-                <input type="checkbox" checked={settings.warmupEnabled} onChange={(event) => updateSettingsDraft({ warmupEnabled: event.target.checked })} />
-                Warmup ramp
-              </label>
-              <label className="checkbox-row compact-check">
-                <input type="checkbox" checked={settings.requireDns} onChange={(event) => updateSettingsDraft({ requireDns: event.target.checked })} />
-                Require DNS
-              </label>
+        <label className="checkbox-row compact-check">
+          <input type="checkbox" checked={settings.warmupEnabled} onChange={(event) => updateSettingsDraft({ warmupEnabled: event.target.checked })} />
+          Warmup ramp
+        </label>
+        <label className="checkbox-row compact-check">
+          <input type="checkbox" checked={settings.requireDns} onChange={(event) => updateSettingsDraft({ requireDns: event.target.checked })} />
+          Require DNS auth
+        </label>
+        {settings.requireDns ? (
+          <div className="dns-check-group">
+            <label className="checkbox-row compact-check">
+              <input type="checkbox" checked={settings.dnsRequireSpf} onChange={(event) => updateSettingsDraft({ dnsRequireSpf: event.target.checked })} />
+              SPF
+            </label>
+            <label className="checkbox-row compact-check">
+              <input type="checkbox" checked={settings.dnsRequireDkim} onChange={(event) => updateSettingsDraft({ dnsRequireDkim: event.target.checked })} />
+              DKIM
+            </label>
+            <label className="checkbox-row compact-check">
+              <input type="checkbox" checked={settings.dnsRequireDmarc} onChange={(event) => updateSettingsDraft({ dnsRequireDmarc: event.target.checked })} />
+              DMARC
+            </label>
+          </div>
+        ) : null}
+        <label className="field-inline">
+          <span>Max retries</span>
+          <input type="number" min="0" max="5" value={settings.maxRetries} onChange={(event) => updateSettingsDraft({ maxRetries: Number(event.target.value) })} />
+        </label>
+        <label className="field-inline">
+          <span>Jitter %</span>
+          <input type="number" min="0" max="50" value={settings.jitterPercent} onChange={(event) => updateSettingsDraft({ jitterPercent: Number(event.target.value) })} />
+        </label>
+        <label className="checkbox-row compact-check">
+          <input type="checkbox" checked={settings.shuffleRecipients} onChange={(event) => updateSettingsDraft({ shuffleRecipients: event.target.checked })} />
+          Shuffle recipients
+        </label>
+        <label className="field-inline">
+          <span>Pause after N fails</span>
+          <input type="number" min="3" max="20" value={settings.failurePauseThreshold} onChange={(event) => updateSettingsDraft({ failurePauseThreshold: Number(event.target.value) })} />
+        </label>
               <div className="button-row">
                 <Tooltip label="Save send settings">
                   <button className="primary-button sm" type="button" disabled={saving} onClick={() => saveSettings(settings)}>Apply</button>

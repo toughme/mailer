@@ -12,6 +12,9 @@ const DEFAULT_SETTINGS = {
   warmupEnabled: true,
   physicalAddress: '',
   requireDns: true,
+  dnsRequireSpf: true,
+  dnsRequireDkim: true,
+  dnsRequireDmarc: true,
   failurePauseThreshold: 5
 };
 
@@ -35,27 +38,30 @@ function createSendSettingsService({ db }) {
     const row = await db.get('SELECT id FROM send_settings WHERE id = 1');
       if (!row) {
       const defaultAddress = pickRandomUsAddress();
-      await db.run(
-        `INSERT INTO send_settings
-         (id, delay_min_ms, delay_max_ms, daily_cap_per_account, rotation_mode, jitter_percent,
-          max_retries, shuffle_recipients, min_spam_score, warmup_enabled, physical_address,
-          require_dns, failure_pause_threshold)
-         VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        [
-          DEFAULT_SETTINGS.delayMinMs,
-          DEFAULT_SETTINGS.delayMaxMs,
-          DEFAULT_SETTINGS.dailyCapPerAccount,
-          DEFAULT_SETTINGS.rotationMode,
-          DEFAULT_SETTINGS.jitterPercent,
-          DEFAULT_SETTINGS.maxRetries,
-          DEFAULT_SETTINGS.shuffleRecipients,
-          DEFAULT_SETTINGS.minSpamScore,
-          DEFAULT_SETTINGS.warmupEnabled ? 1 : 0,
-          defaultAddress,
-          DEFAULT_SETTINGS.requireDns ? 1 : 0,
-          DEFAULT_SETTINGS.failurePauseThreshold
-        ]
-      );
+    await db.run(
+      `INSERT INTO send_settings
+      (id, delay_min_ms, delay_max_ms, daily_cap_per_account, rotation_mode, jitter_percent,
+      max_retries, shuffle_recipients, min_spam_score, warmup_enabled, physical_address,
+      require_dns, dns_require_spf, dns_require_dkim, dns_require_dmarc, failure_pause_threshold)
+      VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [
+        DEFAULT_SETTINGS.delayMinMs,
+        DEFAULT_SETTINGS.delayMaxMs,
+        DEFAULT_SETTINGS.dailyCapPerAccount,
+        DEFAULT_SETTINGS.rotationMode,
+        DEFAULT_SETTINGS.jitterPercent,
+        DEFAULT_SETTINGS.maxRetries,
+        DEFAULT_SETTINGS.shuffleRecipients,
+        DEFAULT_SETTINGS.minSpamScore,
+        DEFAULT_SETTINGS.warmupEnabled ? 1 : 0,
+        defaultAddress,
+        DEFAULT_SETTINGS.requireDns ? 1 : 0,
+        DEFAULT_SETTINGS.dnsRequireSpf ? 1 : 0,
+        DEFAULT_SETTINGS.dnsRequireDkim ? 1 : 0,
+        DEFAULT_SETTINGS.dnsRequireDmarc ? 1 : 0,
+        DEFAULT_SETTINGS.failurePauseThreshold
+      ]
+    );
       return;
     }
 
@@ -78,6 +84,9 @@ function createSendSettingsService({ db }) {
       warmupEnabled: row.warmup_enabled !== 0,
       physicalAddress: row.physical_address || '',
       requireDns: row.require_dns !== 0,
+      dnsRequireSpf: row.dns_require_spf !== 0,
+      dnsRequireDkim: row.dns_require_dkim !== 0,
+      dnsRequireDmarc: row.dns_require_dmarc !== 0,
       failurePauseThreshold: row.failure_pause_threshold ?? 5,
       updatedAt: row.updated_at
     };
@@ -118,40 +127,49 @@ function createSendSettingsService({ db }) {
       const minSpamScore = Math.min(95, Math.max(0, Number(payload.minSpamScore ?? current.minSpamScore)));
       const warmupEnabled = payload.warmupEnabled === false ? 0 : 1;
       const physicalAddress = String(payload.physicalAddress ?? current.physicalAddress).trim();
-      const requireDns = payload.requireDns === false ? 0 : 1;
-      const failurePauseThreshold = Math.min(20, Math.max(3, Number(payload.failurePauseThreshold ?? current.failurePauseThreshold)));
+    const requireDns = payload.requireDns === false ? 0 : 1;
+    const dnsRequireSpf = payload.dnsRequireSpf === false ? 0 : 1;
+    const dnsRequireDkim = payload.dnsRequireDkim === false ? 0 : 1;
+    const dnsRequireDmarc = payload.dnsRequireDmarc === false ? 0 : 1;
+    const failurePauseThreshold = Math.min(20, Math.max(3, Number(payload.failurePauseThreshold ?? current.failurePauseThreshold)));
 
-      await db.run(
-        `UPDATE send_settings SET
-         delay_min_ms = ?,
-         delay_max_ms = ?,
-         daily_cap_per_account = ?,
-         rotation_mode = ?,
-         jitter_percent = ?,
-         max_retries = ?,
-         shuffle_recipients = ?,
-         min_spam_score = ?,
-         warmup_enabled = ?,
-         physical_address = ?,
-         require_dns = ?,
-         failure_pause_threshold = ?,
-         updated_at = CURRENT_TIMESTAMP
-         WHERE id = 1`,
-        [
-          delayMinMs,
-          delayMaxMs,
-          dailyCapPerAccount,
-          rotationMode,
-          jitterPercent,
-          maxRetries,
-          shuffleRecipients,
-          minSpamScore,
-          warmupEnabled,
-          physicalAddress,
-          requireDns,
-          failurePauseThreshold
-        ]
-      );
+    await db.run(
+      `UPDATE send_settings SET
+      delay_min_ms = ?,
+      delay_max_ms = ?,
+      daily_cap_per_account = ?,
+      rotation_mode = ?,
+      jitter_percent = ?,
+      max_retries = ?,
+      shuffle_recipients = ?,
+      min_spam_score = ?,
+      warmup_enabled = ?,
+      physical_address = ?,
+      require_dns = ?,
+      dns_require_spf = ?,
+      dns_require_dkim = ?,
+      dns_require_dmarc = ?,
+      failure_pause_threshold = ?,
+      updated_at = CURRENT_TIMESTAMP
+      WHERE id = 1`,
+      [
+        delayMinMs,
+        delayMaxMs,
+        dailyCapPerAccount,
+        rotationMode,
+        jitterPercent,
+        maxRetries,
+        shuffleRecipients,
+        minSpamScore,
+        warmupEnabled,
+        physicalAddress,
+        requireDns,
+        dnsRequireSpf,
+        dnsRequireDkim,
+        dnsRequireDmarc,
+        failurePauseThreshold
+      ]
+    );
 
       return this.get();
     },

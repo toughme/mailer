@@ -97,18 +97,37 @@ function createSendPreflightService({ db, deliverabilityService }) {
       for (const domain of domains) {
         dnsChecks.push(await checkDomainAuth(domain));
       }
-      const customDomains = domains.filter((domain) => !isProviderManagedDomain(domain));
+    const customDomains = domains.filter((domain) => !isProviderManagedDomain(domain));
+    const requireDns = settings.requireDns !== false;
+    const requireSpf = settings.dnsRequireSpf !== false;
+    const requireDkim = settings.dnsRequireDkim !== false;
+    const requireDmarc = settings.dnsRequireDmarc !== false;
 
-      const requireDns = settings.requireDns !== false;
-      const dnsOk = customDomains.length === 0 || customDomains.every((domain) =>
-        dnsChecks.some((item) => item.domain === domain && item.ok && !item.providerManaged)
-      );
+    let dnsOk = true;
+    if (requireDns && customDomains.length) {
+      for (const domain of customDomains) {
+        const check = dnsChecks.find((item) => item.domain === domain && !item.providerManaged);
+        if (!check) {
+          dnsOk = false;
+          break;
+        }
+        const checks = [];
+        if (requireSpf && !check.spf) checks.push('SPF');
+        if (requireDkim && !check.dkim) checks.push('DKIM');
+        if (requireDmarc && !check.dmarc) checks.push('DMARC');
+        if (checks.length) {
+          dnsOk = false;
+          break;
+        }
+      }
+    }
       const errors = [...contentScan.errors];
       const warnings = [...contentScan.warnings];
 
-      if (requireDns && customDomains.length && !dnsOk) {
-        errors.push('DNS auth incomplete (SPF, DKIM, DMARC required on sending domains).');
-      }
+    if (requireDns && customDomains.length && !dnsOk) {
+      const required = [requireSpf && 'SPF', requireDkim && 'DKIM', requireDmarc && 'DMARC'].filter(Boolean);
+      errors.push(`DNS auth incomplete (${required.join(', ')} required on sending domains).`);
+    }
 
       const eligibleCount = accounts.length;
       if (!eligibleCount) {
@@ -136,12 +155,15 @@ function createSendPreflightService({ db, deliverabilityService }) {
 
     async scanCampaign(campaignId) {
       const settings = await db.get('SELECT * FROM send_settings WHERE id = 1');
-      const mapped = settings
-        ? {
-            minSpamScore: settings.min_spam_score ?? 55,
-            requireDns: settings.require_dns !== 0
-          }
-        : { minSpamScore: 55, requireDns: true };
+    const mapped = settings
+      ? {
+        minSpamScore: settings.min_spam_score ?? 55,
+        requireDns: settings.require_dns !== 0,
+        dnsRequireSpf: settings.dns_require_spf !== 0,
+        dnsRequireDkim: settings.dns_require_dkim !== 0,
+        dnsRequireDmarc: settings.dns_require_dmarc !== 0
+      }
+      : { minSpamScore: 55, requireDns: true, dnsRequireSpf: true, dnsRequireDkim: true, dnsRequireDmarc: true };
       return this.validateCampaign(campaignId, mapped);
     },
 
@@ -167,11 +189,11 @@ function createSendPreflightService({ db, deliverabilityService }) {
             dmarc: true,
             authOk: connStatus === 'connected',
             providerManaged: true,
-            note: connStatus === 'connected'
-              ? 'Microsoft Graph account connected via OAuth.'
-              : connStatus === 'pending'
-                ? 'Microsoft Graph account needs OAuth authorization.'
-                : `Microsoft Graph account status: ${connStatus}`
+        note: connStatus === 'connected'
+          ? 'Microsoft IMAP OAuth account connected.'
+          : connStatus === 'pending'
+            ? 'Microsoft IMAP OAuth account needs authorization.'
+            : `Microsoft IMAP OAuth account status: ${connStatus}`
           });
           continue;
         }

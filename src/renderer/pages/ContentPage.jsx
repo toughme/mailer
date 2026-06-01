@@ -380,6 +380,7 @@ function fallbackComposeBody(value) {
 
 function ContentPage() {
   const toolMenuRef = useRef(null);
+  const saveDocumentRef = useRef(null);
   const [documents, setDocuments] = useState([]);
   const [selectedDocumentId, setSelectedDocumentId] = useState('');
   const [name, setName] = useState('Untitled content');
@@ -435,7 +436,7 @@ function ContentPage() {
       const key = event.key.toLowerCase();
       if (key === 's') {
         event.preventDefault();
-        saveDocument();
+        saveDocumentRef.current?.();
       }
       if (key === 'z') {
         event.preventDefault();
@@ -448,7 +449,7 @@ function ContentPage() {
     };
     document.addEventListener('keydown', handler);
     return () => document.removeEventListener('keydown', handler);
-  }, [blocks, canvas, subject, previewText, name, selectedDocumentId, history, future]);
+  }, []);
 
   useEffect(() => {
     const handleOutsideClick = (event) => {
@@ -665,6 +666,15 @@ function ContentPage() {
   }
 
   async function saveDocument() {
+    if (!subject.trim()) {
+      setError('Subject is required before saving.');
+      return;
+    }
+    if (!activeHtml.trim()) {
+      setError('Content body is empty. Write something before saving.');
+      return;
+    }
+
     try {
       const nextEditorState = {
         blocks,
@@ -681,15 +691,21 @@ function ContentPage() {
         editorHtml: serializeBuilder(nextEditorState),
         contentHtml: activeHtml
       });
+      if (!Array.isArray(rows)) {
+        throw new Error('Unexpected response from save endpoint.');
+      }
       setDocuments(rows);
       const saved = rows.find((row) => row.name === name) || rows[0];
       if (saved) loadDocument(saved);
       setSavedMessage('Saved. This content is now available inside Campaigns.');
+      setError('');
       setTimeout(() => setSavedMessage(''), 3000);
     } catch (saveError) {
-      setError(saveError.message);
+      setError(saveError.message || 'Failed to save document.');
     }
   }
+
+  saveDocumentRef.current = saveDocument;
 
   async function deleteDocument() {
     if (!selectedDocumentId) {
@@ -698,10 +714,14 @@ function ContentPage() {
     }
     try {
       const rows = await desktopInvoke('content:delete-document', { id: Number(selectedDocumentId) });
+      if (!Array.isArray(rows)) {
+        throw new Error('Unexpected response from delete endpoint.');
+      }
       setDocuments(rows);
       rows[0] ? loadDocument(rows[0]) : createNewDocument();
+      setError('');
     } catch (deleteError) {
-      setError(deleteError.message);
+      setError(deleteError.message || 'Failed to delete document.');
     }
   }
 
@@ -959,27 +979,29 @@ function ContentPage() {
               />
             </div>
           </div>
-        ) : contentMode === 'compose' ? (
-            <div className="compose-stage">
-              <div className="compose-header">
-                <div className="compose-header-row">
-                  <label className="compose-subject-field">
-                    Subject
-                    <input value={subject} onChange={(event) => setSubject(event.target.value)} placeholder="Write a subject line" />
-                  </label>
-                  <label className="compose-preview-field">
-                    Preview text
-                    <input value={previewText} onChange={(event) => setPreviewText(event.target.value)} placeholder="Short preview shown in inbox" />
-                  </label>
-                  <div className="compose-header-actions">
-                    <span className={`spam-grade-pill tone-${spamAnalytics.gradeTone}`}>{spamAnalytics.score} · {spamAnalytics.grade}</span>
-                    <button type="button" className="secondary-button sm" onClick={() => setShowTemplates((current) => !current)}>
-                      Templates
-                    </button>
-                    <button type="button" className="primary-button sm" onClick={saveDocument}>Save</button>
-                  </div>
-                </div>
-              </div>
+  ) : contentMode === 'compose' ? (
+  <div className="compose-stage">
+    <div className="compose-header">
+      <div className="compose-header-row">
+        <div className="compose-header-fields">
+          <label className="compose-subject-field">
+            Subject
+            <input value={subject} onChange={(event) => setSubject(event.target.value)} placeholder="Write a subject line" />
+          </label>
+          <label className="compose-preview-field">
+            Preview text
+            <input value={previewText} onChange={(event) => setPreviewText(event.target.value)} placeholder="Short preview shown in inbox" />
+          </label>
+        </div>
+        <div className="compose-header-actions">
+          <span className={`spam-grade-pill tone-${spamAnalytics.gradeTone}`}>{spamAnalytics.score} · {spamAnalytics.grade}</span>
+          <button type="button" className="secondary-button sm" onClick={() => setShowTemplates((current) => !current)}>
+            Templates
+          </button>
+          <button type="button" className="primary-button sm" onClick={saveDocument} disabled={!subject.trim() || !activeHtml.trim()}>Save</button>
+        </div>
+      </div>
+    </div>
               <RichTextEditor
                 content={bodyHtml}
                 onChange={setBodyHtml}
@@ -1014,17 +1036,19 @@ function ContentPage() {
                 onTogglePreviewMode={() => setDevice((current) => (current === 'desktop' ? 'mobile' : 'desktop'))}
                 variant="compose"
               />
-              {showTemplates ? (
-                <div className="builder-template-strip compose-template-strip">
-                  {[...composeTemplates, ...templates.filter((template) => template.mode === 'compose')].map((template, index) => (
-                    <button key={`${template.name}-${index}`} type="button" onClick={() => applyTemplate(template)}>
-                      <strong>{template.name}</strong>
-                      <span>{template.subject}</span>
-                    </button>
-                  ))}
-                </div>
-              ) : null}
-            </div>
+    {showTemplates ? (
+      <div className="builder-template-strip compose-template-strip">
+        {[...composeTemplates, ...templates.filter((template) => template.mode === 'compose')].map((template, index) => (
+          <button key={`${template.name}-${index}`} type="button" onClick={() => applyTemplate(template)}>
+            <strong>{template.name}</strong>
+            <span>{template.subject}</span>
+          </button>
+        ))}
+      </div>
+    ) : null}
+    {savedMessage ? <p className="success-text">{savedMessage}</p> : null}
+    {error ? <p className="error-text">{error}</p> : null}
+  </div>
           ) : (
           <>
             <div className="content-shell-header">

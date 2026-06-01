@@ -177,13 +177,13 @@ function createAccountsDiagnosticsService({ db, security, proxyService, delivera
       const password = String(payload.password || '').trim();
       const proxyProfileId = payload.proxyProfileId ? Number(payload.proxyProfileId) : null;
 
-      if (protocol === 'graph') {
-        if (!payload.id && !payload.email) {
-          throw new Error('Microsoft Graph testing requires a saved account or email to verify.');
-        }
-      } else if (!host || !username || !password) {
-        throw new Error('Host, username/email, and password are required for account testing.');
+    if (protocol === 'graph') {
+      if (!payload.id && !payload.email) {
+        throw new Error('Microsoft OAuth testing requires a saved account or email to verify.');
       }
+    } else if (!host || !username || !password) {
+      throw new Error('Host, username/email, and password are required for account testing.');
+    }
 
       // Retry logic with exponential backoff
       const maxRetries = 3;
@@ -241,28 +241,31 @@ function createAccountsDiagnosticsService({ db, security, proxyService, delivera
             if (onProgress) onProgress('SMTP connection verified!');
             console.log(`[Account Test] SMTP verification successful`);
 
-      } else if (protocol === 'graph') {
-        if (!microsoftOauthService) {
-          throw new Error('Microsoft OAuth diagnostics are not configured in the app.');
-        }
-        if (!payload.id) {
-          throw new Error('Graph account diagnostics require a saved account.');
-        }
+    } else if (protocol === 'graph') {
+      if (!microsoftOauthService) {
+        throw new Error('Microsoft OAuth diagnostics are not configured in the app.');
+      }
+      if (!payload.id) {
+        throw new Error('Microsoft OAuth account diagnostics require a saved account.');
+      }
 
-        const accountRow = await db.get('SELECT * FROM accounts WHERE id = ?', [Number(payload.id)]);
-        if (!accountRow) {
-          throw new Error('Account not found in database.');
-        }
-        const connStatus = accountRow.connection_status || 'pending';
-        if (connStatus !== 'connected') {
-          throw new Error('Microsoft Graph account is not authorized. Click Authorize to complete OAuth setup.');
-        }
+      const accountRow = await db.get('SELECT * FROM accounts WHERE id = ?', [Number(payload.id)]);
+      if (!accountRow) {
+        throw new Error('Account not found in database.');
+      }
+      const connStatus = accountRow.connection_status || 'pending';
+      if (connStatus !== 'connected') {
+        throw new Error('Microsoft OAuth account is not authorized. Click Authorize to complete OAuth setup.');
+      }
 
-        if (onProgress) onProgress('Verifying Microsoft Graph credentials...');
-        console.log(`[Account Test] Verifying Microsoft Graph account ${payload.id}`);
-        await microsoftOauthService.verifyConnection(Number(payload.id));
-        if (onProgress) onProgress('Microsoft Graph account verified!');
-        console.log(`[Account Test] Microsoft Graph verification successful`);
+      if (onProgress) onProgress('Verifying Microsoft OAuth credentials via IMAP...');
+      console.log(`[Account Test] Verifying Microsoft OAuth account ${payload.id} via IMAP XOAUTH2`);
+      const verifyResult = await microsoftOauthService.verifyConnection(Number(payload.id));
+      if (!verifyResult.ok) {
+        throw new Error('IMAP XOAUTH2 verification failed. The OAuth session may be invalid.');
+      }
+      if (onProgress) onProgress('Microsoft OAuth account verified!');
+      console.log(`[Account Test] Microsoft OAuth IMAP verification successful`);
 
           } else if (protocol === 'imap') {
             if (proxyProfileId) {
@@ -350,16 +353,19 @@ function createAccountsDiagnosticsService({ db, security, proxyService, delivera
       if (!account) {
         throw new Error('Account not found.');
       }
-      const payload = {
-        primaryProtocol: account.primary_protocol || 'smtp',
-        host: account.host,
-        port: account.port,
-        secure: Boolean(account.secure),
-        username: account.username || account.email,
-        email: account.email,
-        password: security.decrypt(account.encrypted_password),
-        proxyProfileId: account.proxy_profile_id
-      };
+    const payload = {
+      primaryProtocol: account.primary_protocol || 'smtp',
+      host: account.host,
+      port: account.port,
+      secure: Boolean(account.secure),
+      username: account.username || account.email,
+      email: account.email,
+      password: (account.primary_protocol || 'smtp').toLowerCase() === 'graph'
+        ? ''
+        : security.decrypt(account.encrypted_password),
+      id: account.id,
+      proxyProfileId: account.proxy_profile_id
+    };
 
       const result = await this.testConnection(payload, onProgress);
 

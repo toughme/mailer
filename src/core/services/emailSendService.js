@@ -87,6 +87,22 @@ function createEmailSendService({ db, security, proxyService, microsoftOauthServ
     });
   }
 
+  async function buildOAuthTransport(account) {
+    if (!microsoftOauthService) {
+      throw new Error('Microsoft OAuth service is not configured.');
+    }
+
+    const transportConfig = await microsoftOauthService.getSmtpTransportConfig(account.id);
+    const proxy = proxyService && account.proxy_profile_id
+      ? await proxyService.getTransportProxyUrl(account.proxy_profile_id)
+      : '';
+
+    return nodemailer.createTransport({
+      ...transportConfig,
+      ...(proxy ? { proxy } : {})
+    });
+  }
+
   return {
     applyTokens,
 
@@ -97,12 +113,12 @@ function createEmailSendService({ db, security, proxyService, microsoftOauthServ
       }
 
       const protocol = String(account.primary_protocol || 'smtp').toLowerCase();
-      if (protocol === 'graph') {
-        if (!microsoftOauthService) {
-          throw new Error('Microsoft OAuth service is not configured.');
-        }
-      } else if (protocol !== 'smtp') {
-        throw new Error('Account is not configured for SMTP or Graph sending.');
+      if (protocol !== 'smtp' && protocol !== 'graph') {
+        throw new Error('Account is not configured for SMTP or Microsoft OAuth sending.');
+      }
+
+      if (protocol === 'graph' && !microsoftOauthService) {
+        throw new Error('Microsoft OAuth service is not configured.');
       }
 
       const password = protocol === 'smtp' ? security.decrypt(account.encrypted_password) : null;
@@ -123,24 +139,10 @@ function createEmailSendService({ db, security, proxyService, microsoftOauthServ
       const fromAddress = account.email;
       const unsubscribeMailto = `<mailto:${fromAddress}?subject=unsubscribe>`;
 
-      if (String(account.primary_protocol || 'smtp').toLowerCase() === 'graph') {
-        await microsoftOauthService.sendMail({
-          accountId: account.id,
-          fromAddress,
-          recipient,
-          subject: personalizedSubject,
-          html: personalizedHtml,
-          previewText: previewText ? applyTokens(previewText, recipient) : '',
-          attachments: directives.attachments,
-          settings
-        });
-        return {
-          messageId: `graph:${Date.now()}`,
-          accountEmail: fromAddress
-        };
-      }
+      const transporter = protocol === 'graph'
+        ? await buildOAuthTransport(account)
+        : await buildTransport(account, password);
 
-      const transporter = await buildTransport(account, password);
       const info = await transporter.sendMail({
         from: `"${fromName}" <${fromAddress}>`,
         to: recipient.name ? `"${recipient.name}" <${recipient.email}>` : recipient.email,

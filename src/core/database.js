@@ -359,6 +359,9 @@ async function initializeDatabase(baseDataDir) {
   await addColumnIfMissing(manager, 'send_settings', 'physical_address', "TEXT DEFAULT ''");
   await addColumnIfMissing(manager, 'send_settings', 'require_dns', 'INTEGER DEFAULT 1');
   await addColumnIfMissing(manager, 'send_settings', 'failure_pause_threshold', 'INTEGER DEFAULT 5');
+  await addColumnIfMissing(manager, 'send_settings', 'dns_require_spf', 'INTEGER DEFAULT 1');
+  await addColumnIfMissing(manager, 'send_settings', 'dns_require_dkim', 'INTEGER DEFAULT 1');
+  await addColumnIfMissing(manager, 'send_settings', 'dns_require_dmarc', 'INTEGER DEFAULT 1');
   await addColumnIfMissing(manager, 'ai_settings', 'system_prompt', "TEXT");
 
   await manager.run(`

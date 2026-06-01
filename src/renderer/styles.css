@@ -3232,6 +3232,13 @@ textarea {
   gap: 12px;
 }
 
+.dns-check-group {
+  display: flex;
+  gap: 12px;
+  grid-column: 1 / -1;
+  padding-left: 18px;
+}
+
 .field-inline {
   display: flex;
   flex-direction: column;
@@ -3589,7 +3596,13 @@ textarea {
 
 .compose-header-row {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 10px;
+}
+
+.compose-header-fields {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
   gap: 10px;
 }
 

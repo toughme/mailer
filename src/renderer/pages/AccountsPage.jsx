@@ -22,7 +22,7 @@ const providerTemplates = [
   { id: 'custom', label: 'Custom', provider: 'Custom provider', primaryProtocol: 'smtp', host: '', port: 587, secure: true },
   { id: 'gmail', label: 'Gmail', provider: 'Gmail SMTP', primaryProtocol: 'smtp', host: 'smtp.gmail.com', port: 587, secure: true },
   { id: 'outlook', label: 'Outlook', provider: 'Outlook SMTP', primaryProtocol: 'smtp', host: 'smtp.office365.com', port: 587, secure: true },
-  { id: 'microsoft', label: 'Microsoft Graph', provider: 'Microsoft Graph', primaryProtocol: 'graph', host: '', port: 0, secure: true },
+  { id: 'microsoft', label: 'Microsoft OAuth', provider: 'Microsoft OAuth', primaryProtocol: 'graph', host: '', port: 0, secure: true },
   { id: 'sendgrid', label: 'SendGrid', provider: 'SendGrid SMTP', primaryProtocol: 'smtp', host: 'smtp.sendgrid.net', port: 587, secure: true },
   { id: 'ses', label: 'SES', provider: 'Amazon SES', primaryProtocol: 'smtp', host: 'email-smtp.us-east-1.amazonaws.com', port: 587, secure: true },
   { id: 'mailgun', label: 'Mailgun', provider: 'Mailgun SMTP', primaryProtocol: 'smtp', host: 'smtp.mailgun.org', port: 587, secure: true },
@@ -93,20 +93,20 @@ function AccountsPage() {
 
   async function handleAuthorize(accountId) {
     try {
-      startProcess('Authorizing Microsoft Graph', { message: 'Opening authentication window... A browser window will open for you to sign in to Microsoft.' });
+      startProcess('Authorizing Microsoft OAuth', { message: 'Opening authentication window... A browser window will open for you to sign in to Microsoft.' });
       setAuthorizingAccountId(accountId);
       const result = await desktopInvoke('accounts:graph-authorize', { id: accountId });
-      completeProcess('Microsoft Graph authorization completed');
+      completeProcess('Microsoft OAuth authorization completed');
       setError('');
       setTestResult(result.connected
-        ? `Microsoft Graph account authorized successfully. Connected as ${result.email || 'user'}.`
-        : 'Microsoft Graph account authorized successfully.'
+        ? `Microsoft OAuth account authorized successfully. Connected as ${result.email || 'user'}.`
+        : 'Microsoft OAuth account authorized successfully.'
       );
       await loadAccounts();
       await loadAuthHealth();
     } catch (authorizeError) {
       const isCancelled = authorizeError.message?.includes('cancelled');
-      completeProcess(isCancelled ? 'Authorization cancelled' : 'Microsoft Graph authorization failed');
+      completeProcess(isCancelled ? 'Authorization cancelled' : 'Microsoft OAuth authorization failed');
       if (isCancelled) {
         setError('Microsoft authorization was cancelled. Click Authorize to try again.');
         setTestResult('');
@@ -142,7 +142,7 @@ function AccountsPage() {
 
   async function handleTestDraft() {
     if (isGraphProtocol) {
-      setError('Save the Microsoft Graph account first, then authorize it before testing.');
+      setError('Save the Microsoft OAuth account first, then authorize it before testing.');
       setTestResult('');
       return;
     }
@@ -261,7 +261,7 @@ function AccountsPage() {
                 <option value="smtp">SMTP</option>
                 <option value="imap">IMAP</option>
                 <option value="pop3">POP3</option>
-                <option value="graph">Microsoft Graph</option>
+                <option value="graph">Microsoft OAuth</option>
               </select>
             </label>
             {!isGraphProtocol ? (
@@ -303,7 +303,7 @@ function AccountsPage() {
                 </label>
               </>
             ) : (
-              <p className="muted-copy">Microsoft Graph accounts use OAuth authorization instead of direct SMTP credentials.</p>
+              <p className="muted-copy">Microsoft OAuth accounts use IMAP/SMTP OAuth authorization instead of direct SMTP credentials.</p>
             )}
           </div>
           <div className="button-row">
@@ -369,7 +369,7 @@ function AccountsPage() {
                   ) : null}
                   {account.primaryProtocol === 'graph' ? (
                     <span className={`pill ${account.connectionStatus === 'connected' ? 'pill-pass' : account.connectionStatus === 'pending' ? 'pill-review' : 'pill-fail'}`}>
-                      {account.connectionStatus === 'connected' ? 'graph ok' : account.connectionStatus === 'pending' ? 'auth needed' : account.connectionStatus === 'connecting' ? 'connecting' : 're-auth'}
+                      {account.connectionStatus === 'connected' ? 'imap ok' : account.connectionStatus === 'pending' ? 'auth needed' : account.connectionStatus === 'connecting' ? 'connecting' : 're-auth'}
                     </span>
                   ) : null}
                   {test ? (
@@ -379,14 +379,14 @@ function AccountsPage() {
                   ) : null}
                   <div className="button-row">
                     {account.primaryProtocol === 'graph' && account.connectionStatus !== 'connected' ? (
-                      <Tooltip label="Authorize Microsoft Graph">
+                      <Tooltip label="Authorize Microsoft OAuth">
                         <button className="ghost-button sm" type="button" onClick={() => handleAuthorize(account.id)} disabled={authorizingAccountId === account.id}>
                           {authorizingAccountId === account.id ? 'Authorizing…' : 'Authorize'}
                         </button>
                       </Tooltip>
                     ) : null}
                     {account.primaryProtocol === 'graph' && account.connectionStatus === 'connected' ? (
-                      <Tooltip label="Re-authorize Microsoft Graph">
+                      <Tooltip label="Re-authorize Microsoft OAuth">
                         <button className="ghost-button sm" type="button" onClick={() => handleAuthorize(account.id)} disabled={authorizingAccountId === account.id}>
                           {authorizingAccountId === account.id ? 'Authorizing…' : 'Re-auth'}
                         </button>
