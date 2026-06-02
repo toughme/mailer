@@ -16,7 +16,9 @@ const initialForm = {
   segmentId: '',
   recipientIds: [],
   useIndividualRecipients: false,
-  scheduledAt: ''
+  scheduledAt: '',
+  replyTo: '',
+  timezone: ''
 };
 
 function formatFileSize(size) {
@@ -77,12 +79,20 @@ function CampaignsPage() {
   const [recipientSearch, setRecipientSearch] = useState('');
   const [editingCampaignId, setEditingCampaignId] = useState(null);
   const [pendingConfirmation, setPendingConfirmation] = useState(null);
+  const [attachmentPanel, setAttachmentPanel] = useState(null);
+  const [campaignSearch, setCampaignSearch] = useState('');
   const formPanelRef = useRef(null);
   const { process, startProcess, updateProcess, completeProcess, cancelProcess } = useProcess();
 
   const filteredRecipients = recipients.filter((r) => {
     const query = recipientSearch.toLowerCase();
     return r.email.toLowerCase().includes(query) || r.name.toLowerCase().includes(query);
+  });
+
+  const filteredCampaigns = campaigns.filter((c) => {
+    if (!campaignSearch.trim()) return true;
+    const query = campaignSearch.toLowerCase();
+    return c.name.toLowerCase().includes(query) || (c.subject || '').toLowerCase().includes(query) || (c.status || '').toLowerCase().includes(query);
   });
 
   async function refreshCampaignStatuses(campaignRows) {
@@ -130,6 +140,20 @@ function CampaignsPage() {
   }, []);
 
   useEffect(() => {
+    const handler = (event) => {
+      if ((event.ctrlKey || event.metaKey) && event.key === 'Enter') {
+        event.preventDefault();
+        const formEl = formPanelRef.current?.querySelector('form');
+        if (formEl) {
+          formEl.requestSubmit();
+        }
+      }
+    };
+    document.addEventListener('keydown', handler);
+    return () => document.removeEventListener('keydown', handler);
+  }, []);
+
+  useEffect(() => {
     const hasActiveWork = campaigns.some((campaign) => {
       const liveStatus = campaignStatusMap[campaign.id];
       const metrics = liveStatus?.metrics || campaign.metrics || {};
@@ -172,21 +196,36 @@ function CampaignsPage() {
         return;
       }
 
-      const html = attachments.map((attachment) => {
-        const url = normalizeUrl(window.prompt(`Enter a URL to open when ${attachment.filename || 'this file'} is clicked`, attachment.url || 'https://') || '');
-        return buildAttachmentHtml({
+      setAttachmentPanel({
+        field,
+        attachments: attachments.map((attachment) => ({
           ...attachment,
-          url
-        });
-      }).join('');
-
-      setForm((current) => ({
-        ...current,
-        [field]: `${current[field] || ''}${html}`
-      }));
+          url: attachment.url || 'https://'
+        }))
+      });
     } catch (attachmentError) {
       setError(attachmentError.message || 'Unable to add attachment.');
     }
+  }
+
+  function applyAttachmentPanel() {
+    if (!attachmentPanel) {
+      return;
+    }
+
+    const html = attachmentPanel.attachments.map((attachment) => {
+      const url = normalizeUrl(attachment.url);
+      return buildAttachmentHtml({
+        ...attachment,
+        url
+      });
+    }).join('');
+
+    setForm((current) => ({
+      ...current,
+      [attachmentPanel.field]: `${current[attachmentPanel.field] || ''}${html}`
+    }));
+    setAttachmentPanel(null);
   }
 
   async function handleSubmit(event) {
@@ -221,7 +260,9 @@ function CampaignsPage() {
       segmentId: campaign.segmentId || '',
       recipientIds: campaign.recipientIds || [],
       useIndividualRecipients: campaign.useIndividualRecipients,
-      scheduledAt: campaign.scheduledAt || ''
+      scheduledAt: campaign.scheduledAt || '',
+      replyTo: campaign.replyTo || '',
+      timezone: campaign.timezone || ''
     });
     setEditingCampaignId(campaign.id);
     
@@ -549,10 +590,29 @@ function CampaignsPage() {
                 </select>
               </label>
             )}
-            <label>
-              Schedule
-              <input type="datetime-local" value={form.scheduledAt} onChange={(event) => setForm({ ...form, scheduledAt: event.target.value })} />
-            </label>
+<label>
+Schedule
+<div className="tz-picker-row">
+<input type="datetime-local" value={form.scheduledAt} onChange={(event) => setForm({ ...form, scheduledAt: event.target.value })} />
+<select value={form.timezone} onChange={(event) => setForm({ ...form, timezone: event.target.value })}>
+<option value="">Local</option>
+<option value="America/New_York">ET</option>
+<option value="America/Chicago">CT</option>
+<option value="America/Denver">MT</option>
+<option value="America/Los_Angeles">PT</option>
+<option value="Europe/London">GMT</option>
+<option value="Europe/Berlin">CET</option>
+<option value="Asia/Tokyo">JST</option>
+<option value="Asia/Shanghai">CST</option>
+<option value="Australia/Sydney">AEST</option>
+<option value="UTC">UTC</option>
+</select>
+</div>
+</label>
+<label className="reply-to-field">
+Reply-to
+<input type="email" value={form.replyTo} onChange={(event) => setForm({ ...form, replyTo: event.target.value })} placeholder="Optional reply-to address" />
+</label>
           </div>
           {showRecipientPicker && form.useIndividualRecipients && (
             <div className="section-grid" style={{ border: '1px solid rgba(255,255,255,0.1)', padding: '12px', borderRadius: '4px', marginBottom: '12px' }}>
@@ -600,17 +660,24 @@ function CampaignsPage() {
       </div>
 
       <div className="panel campaign-summary-panel">
-        <div className="panel-toolbar account-summary-toolbar">
-          <div>
-            <strong>Emails</strong>
-            <p className="muted-copy">Pre-send status and delivery controls.</p>
-          </div>
-          <Tooltip label="Scan every draft, scheduled, and paused email">
-            <button className="primary-button sm" type="button" onClick={scanAllCampaigns}>Scan All</button>
-          </Tooltip>
-        </div>
-        <div className="list-stack">
-          {campaigns.map((campaign) => (
+<div className="panel-toolbar account-summary-toolbar">
+<div>
+<strong>Emails</strong>
+<p className="muted-copy">Pre-send status and delivery controls.</p>
+</div>
+<Tooltip label="Scan every draft, scheduled, and paused email">
+<button className="primary-button sm" type="button" onClick={scanAllCampaigns}>Scan All</button>
+</Tooltip>
+</div>
+<input
+type="text"
+className="campaign-search-bar"
+placeholder="Search emails by name, subject, or status..."
+value={campaignSearch}
+onChange={(event) => setCampaignSearch(event.target.value)}
+/>
+<div className="list-stack">
+{filteredCampaigns.map((campaign) => (
             <div className="campaign-card compact" key={campaign.id}>
               {(() => {
                 const liveStatus = campaignStatusMap[campaign.id];
@@ -682,69 +749,131 @@ function CampaignsPage() {
         onCancel={cancelProcess}
       />
     )}
-    {pendingConfirmation && (
+  {pendingConfirmation && (
+    <div style={{
+      position: 'fixed',
+      inset: 0,
+      background: 'rgba(0, 0, 0, 0.5)',
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'center',
+      zIndex: 1000
+    }}>
       <div style={{
-        position: 'fixed',
-        inset: 0,
-        background: 'rgba(0, 0, 0, 0.5)',
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        zIndex: 1000
+        background: 'var(--panel)',
+        borderRadius: 'var(--border-radius-lg)',
+        padding: '32px',
+        maxWidth: '520px',
+        boxShadow: 'var(--shadow-xl)'
       }}>
+        <h2 style={{ margin: '0 0 16px', color: 'var(--text)' }}>
+          Email Warnings
+        </h2>
+        <p style={{ color: 'var(--text-secondary)', marginBottom: '16px' }}>
+          This email has some warnings but can still be sent. Would you like to proceed?
+        </p>
         <div style={{
-          background: 'var(--panel)',
-          borderRadius: 'var(--border-radius-lg)',
-          padding: '32px',
-          maxWidth: '520px',
-          boxShadow: 'var(--shadow-xl)'
+          background: 'var(--panel-alt)',
+          border: '1px solid var(--panel-border)',
+          borderRadius: 'var(--border-radius-md)',
+          padding: '12px',
+          marginBottom: '24px',
+          maxHeight: '200px',
+          overflowY: 'auto'
         }}>
-          <h2 style={{ margin: '0 0 16px', color: 'var(--text)' }}>
-            Email Warnings
-          </h2>
-          <p style={{ color: 'var(--text-secondary)', marginBottom: '16px' }}>
-            This email has some warnings but can still be sent. Would you like to proceed?
-          </p>
-          <div style={{
-            background: 'var(--panel-alt)',
-            border: '1px solid var(--panel-border)',
-            borderRadius: 'var(--border-radius-md)',
-            padding: '12px',
-            marginBottom: '24px',
-            maxHeight: '200px',
-            overflowY: 'auto'
-          }}>
-            {pendingConfirmation.warnings.map((warning, index) => (
-              <div key={index} style={{ 
-                padding: '8px 0', 
-                borderBottom: index < pendingConfirmation.warnings.length - 1 ? '1px solid var(--panel-border)' : 'none',
-                color: 'var(--warn)'
-              }}>
-                • {warning}
-              </div>
-            ))}
-          </div>
-          <div style={{ display: 'flex', gap: '12px', justifyContent: 'flex-end' }}>
-            <button
-              className="ghost-button"
-              type="button"
-              onClick={() => setPendingConfirmation(null)}
-              style={{ padding: '10px 20px' }}
-            >
-              Cancel
-            </button>
-            <button
-              className="primary-button"
-              type="button"
-              onClick={() => moveTo('active', pendingConfirmation.campaignId, true)}
-              style={{ padding: '10px 20px' }}
-            >
-              Send Anyway
-            </button>
-          </div>
+          {pendingConfirmation.warnings.map((warning, index) => (
+            <div key={index} style={{
+              padding: '8px 0',
+              borderBottom: index < pendingConfirmation.warnings.length - 1 ? '1px solid var(--panel-border)' : 'none',
+              color: 'var(--warn)'
+            }}>
+              • {warning}
+            </div>
+          ))}
+        </div>
+        <div style={{ display: 'flex', gap: '12px', justifyContent: 'flex-end' }}>
+          <button
+            className="ghost-button"
+            type="button"
+            onClick={() => setPendingConfirmation(null)}
+            style={{ padding: '10px 20px' }}
+          >
+            Cancel
+          </button>
+          <button
+            className="primary-button"
+            type="button"
+            onClick={() => moveTo('active', pendingConfirmation.campaignId, true)}
+            style={{ padding: '10px 20px' }}
+          >
+            Send Anyway
+          </button>
         </div>
       </div>
-    )}
+    </div>
+  )}
+  {attachmentPanel && (
+    <div style={{
+      position: 'fixed',
+      inset: 0,
+      background: 'rgba(0, 0, 0, 0.5)',
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'center',
+      zIndex: 1000
+    }}>
+      <div style={{
+        background: 'var(--panel)',
+        borderRadius: 'var(--border-radius-lg)',
+        padding: '24px',
+        maxWidth: '540px',
+        width: '100%',
+        boxShadow: 'var(--shadow-xl)'
+      }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '16px' }}>
+          <h2 style={{ margin: 0, color: 'var(--text)', fontSize: '15px' }}>
+            Attachment link URLs
+          </h2>
+          <button className="ghost-button sm" type="button" onClick={() => setAttachmentPanel(null)}>Cancel</button>
+        </div>
+        <p style={{ color: 'var(--text-secondary)', fontSize: '12px', marginBottom: '16px' }}>
+          When a recipient clicks the attachment, they will be taken to this URL. Leave blank for a standard file download.
+        </p>
+        {attachmentPanel.attachments.map((attachment, index) => (
+          <div key={index} style={{ padding: '10px 0', borderBottom: index < attachmentPanel.attachments.length - 1 ? '1px solid var(--panel-border)' : 'none' }}>
+<div style={{ display: 'flex', alignItems: 'baseline', gap: '8px', marginBottom: '6px' }}>
+{attachment.contentType?.startsWith('image/') && attachment.content ? (
+<div className="attachment-preview-thumb">
+<img src={`data:${attachment.contentType};base64,${attachment.content}`} alt={attachment.filename} />
+</div>
+) : attachment.contentType === 'application/pdf' ? (
+<div className="attachment-preview-thumb">PDF</div>
+) : null}
+<strong style={{ fontSize: '13px', color: 'var(--text)' }}>{attachment.filename || 'Attachment'}</strong>
+              <span style={{ fontSize: '11px', color: 'var(--muted)' }}>{formatFileSize(attachment.size)}</span>
+            </div>
+            <label style={{ display: 'flex', flexDirection: 'column', gap: '4px', fontSize: '12px', fontWeight: 600, color: 'var(--text-secondary)' }}>
+              Link URL
+              <input
+                type="url"
+                value={attachment.url}
+                onChange={(event) => {
+                  const next = [...attachmentPanel.attachments];
+                  next[index] = { ...next[index], url: event.target.value };
+                  setAttachmentPanel({ ...attachmentPanel, attachments: next });
+                }}
+                placeholder="https://example.com/page"
+                style={{ width: '100%', minHeight: '32px', border: '1px solid var(--panel-border)', borderRadius: '6px', background: 'var(--panel-alt)', color: 'var(--text)', padding: '6px 10px', fontSize: '13px' }}
+              />
+            </label>
+          </div>
+        ))}
+        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px', marginTop: '16px' }}>
+          <button className="primary-button sm" type="button" onClick={applyAttachmentPanel}>Insert attachments</button>
+        </div>
+      </div>
+    </div>
+  )}
     </>
   );
 }

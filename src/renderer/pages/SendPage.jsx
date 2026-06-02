@@ -44,6 +44,19 @@ function SendPage() {
     return () => clearInterval(timer);
   }, [refresh]);
 
+  useEffect(() => {
+    const handler = (event) => {
+      if ((event.ctrlKey || event.metaKey) && event.key === 'Enter') {
+        event.preventDefault();
+        if (settings && settingsDirty) {
+          saveSettings(settings);
+        }
+      }
+    };
+    document.addEventListener('keydown', handler);
+    return () => document.removeEventListener('keydown', handler);
+  }, [settings, settingsDirty]);
+
   async function saveSettings(patch) {
     setSaving(true);
     try {
@@ -266,15 +279,31 @@ function SendPage() {
           <span>Jitter %</span>
           <input type="number" min="0" max="50" value={settings.jitterPercent} onChange={(event) => updateSettingsDraft({ jitterPercent: Number(event.target.value) })} />
         </label>
-        <label className="checkbox-row compact-check">
-          <input type="checkbox" checked={settings.shuffleRecipients} onChange={(event) => updateSettingsDraft({ shuffleRecipients: event.target.checked })} />
-          Shuffle recipients
-        </label>
-        <label className="field-inline">
-          <span>Pause after N fails</span>
-          <input type="number" min="3" max="20" value={settings.failurePauseThreshold} onChange={(event) => updateSettingsDraft({ failurePauseThreshold: Number(event.target.value) })} />
-        </label>
-              <div className="button-row">
+<label className="checkbox-row compact-check">
+<input type="checkbox" checked={settings.shuffleRecipients} onChange={(event) => updateSettingsDraft({ shuffleRecipients: event.target.checked })} />
+Shuffle recipients
+</label>
+<label className="field-inline">
+<span>Pause after N fails</span>
+<input type="number" min="3" max="20" value={settings.failurePauseThreshold} onChange={(event) => updateSettingsDraft({ failurePauseThreshold: Number(event.target.value) })} />
+</label>
+{(() => {
+const dailyCap = settings.dailyCapPerAccount || 100;
+const usedPct = accountHealth.length ? Math.round((accountHealth.reduce((sum, a) => sum + (a.sendsToday || 0), 0) / (accountHealth.length * dailyCap)) * 100) : 0;
+const gaugeColor = usedPct > 80 ? '#ef4444' : usedPct > 50 ? '#f59e0b' : '#10b981';
+return (
+<div className="throttle-gauge">
+<div className="throttle-gauge-label">
+<span>Daily send utilization</span>
+<span>{usedPct}%</span>
+</div>
+<div className="throttle-gauge-bar">
+<div className="throttle-gauge-fill" style={{ width: `${Math.min(usedPct, 100)}%`, background: gaugeColor }} />
+</div>
+</div>
+);
+})()}
+<div className="button-row">
                 <Tooltip label="Save send settings">
                   <button className="primary-button sm" type="button" disabled={saving} onClick={() => saveSettings(settings)}>Apply</button>
                 </Tooltip>

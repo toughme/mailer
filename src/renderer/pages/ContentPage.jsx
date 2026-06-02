@@ -400,6 +400,7 @@ function ContentPage() {
   const [savedMessage, setSavedMessage] = useState('');
   const [error, setError] = useState('');
   const [showPreview, setShowPreview] = useState(false);
+  const [previewMergeData, setPreviewMergeData] = useState({ first_name: 'Jane', last_name: 'Doe', company: 'Acme Corp', email: 'jane@acme.com', unsubscribe_url: '#' });
   const [templates, setTemplates] = useState(() => JSON.parse(localStorage.getItem('pm.content.templates') || '[]'));
   const [savedBlocks, setSavedBlocks] = useState(() => JSON.parse(localStorage.getItem('pm.content.blocks') || '[]'));
   const [showTemplates, setShowTemplates] = useState(false);
@@ -409,6 +410,9 @@ function ContentPage() {
   const [rightPanelCollapsed, setRightPanelCollapsed] = useState(true);
   const [toolMenuOpen, setToolMenuOpen] = useState(false);
   const [showKeyboardHelp, setShowKeyboardHelp] = useState(false);
+  const [autoSaveStatus, setAutoSaveStatus] = useState('');
+  const autoSaveTimerRef = useRef(null);
+  const lastSavedRef = useRef('');
 
   const selectedBlock = blocks.find((block) => block.id === selectedBlockId) || blocks[0];
   const builderHtml = useMemo(() => buildEmailHtml({ subject, previewText, blocks, canvas }), [subject, previewText, blocks, canvas]);
@@ -452,19 +456,50 @@ function ContentPage() {
   }, []);
 
   useEffect(() => {
-    const handleOutsideClick = (event) => {
-      if (!toolMenuOpen) {
-        return;
-      }
+  const handleOutsideClick = (event) => {
+    if (!toolMenuOpen) {
+      return;
+    }
 
-      if (toolMenuRef.current && !toolMenuRef.current.contains(event.target)) {
-        setToolMenuOpen(false);
-      }
-    };
+    if (toolMenuRef.current && !toolMenuRef.current.contains(event.target)) {
+      setToolMenuOpen(false);
+    }
+  };
 
-    window.addEventListener('mousedown', handleOutsideClick);
-    return () => window.removeEventListener('mousedown', handleOutsideClick);
+  window.addEventListener('mousedown', handleOutsideClick);
+  return () => window.removeEventListener('mousedown', handleOutsideClick);
   }, [toolMenuOpen]);
+
+  useEffect(() => {
+  if (autoSaveTimerRef.current) {
+    clearInterval(autoSaveTimerRef.current);
+  }
+
+  autoSaveTimerRef.current = setInterval(() => {
+  const currentSignature = JSON.stringify({ subject, previewText, bodyHtml, blocks, canvas, contentMode, name });
+  if (currentSignature === lastSavedRef.current) {
+    return;
+  }
+  if (!subject.trim() || !activeHtml.trim()) {
+    return;
+  }
+
+  lastSavedRef.current = currentSignature;
+  saveDocument().then(() => {
+  setAutoSaveStatus('Auto-saved');
+  setTimeout(() => setAutoSaveStatus(''), 2000);
+  }).catch(() => {
+  setAutoSaveStatus('Auto-save failed');
+  setTimeout(() => setAutoSaveStatus(''), 3000);
+  });
+  }, 30000);
+
+  return () => {
+  if (autoSaveTimerRef.current) {
+    clearInterval(autoSaveTimerRef.current);
+  }
+  };
+  }, [subject, previewText, bodyHtml, blocks, canvas, contentMode, name, activeHtml]);
 
   function snapshot() {
     return { blocks, canvas };
@@ -1021,9 +1056,10 @@ function ContentPage() {
             Templates
           </button>
           <button type="button" className="primary-button sm" onClick={saveDocument} disabled={!subject.trim() || !activeHtml.trim()}>Save</button>
-        </div>
-      </div>
-    </div>
+          </div>
+          </div>
+          </div>
+          {autoSaveStatus && <span className="auto-save-indicator">{autoSaveStatus}</span>}
               <RichTextEditor
                 content={bodyHtml}
                 onChange={setBodyHtml}
@@ -1244,15 +1280,23 @@ function ContentPage() {
         </aside>
       ) : null}
 
-      {showPreview && (
-        <div className="builder-preview-modal">
-          <div className="builder-preview-head">
-            <strong>Preview test email</strong>
-            <button type="button" onClick={() => setShowPreview(false)}>Close</button>
-          </div>
-          <iframe title="Email preview" srcDoc={activeHtml} />
-        </div>
-      )}
+  {showPreview && (
+  <div className="builder-preview-modal">
+  <div className="builder-preview-head">
+  <strong>Preview test email <span className="merge-preview-badge">Merge preview</span></strong>
+  <button type="button" onClick={() => setShowPreview(false)}>Close</button>
+  </div>
+  <div style={{ padding: '8px 12px', background: 'rgba(15,23,42,0.5)', borderBottom: '1px solid rgba(255,255,255,0.06)' }}>
+  <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', alignItems: 'center', fontSize: '12px' }}>
+  <label style={{ display: 'flex', gap: '4px', alignItems: 'center', color: '#94a3b8' }}>First<input value={previewMergeData.first_name} onChange={(e) => setPreviewMergeData((d) => ({ ...d, first_name: e.target.value }))} style={{ width: '70px', padding: '2px 6px', fontSize: '11px', border: '1px solid rgba(255,255,255,0.12)', borderRadius: '4px', background: 'rgba(15,23,42,0.4)', color: '#e2e8f0' }} /></label>
+  <label style={{ display: 'flex', gap: '4px', alignItems: 'center', color: '#94a3b8' }}>Last<input value={previewMergeData.last_name} onChange={(e) => setPreviewMergeData((d) => ({ ...d, last_name: e.target.value }))} style={{ width: '70px', padding: '2px 6px', fontSize: '11px', border: '1px solid rgba(255,255,255,0.12)', borderRadius: '4px', background: 'rgba(15,23,42,0.4)', color: '#e2e8f0' }} /></label>
+  <label style={{ display: 'flex', gap: '4px', alignItems: 'center', color: '#94a3b8' }}>Company<input value={previewMergeData.company} onChange={(e) => setPreviewMergeData((d) => ({ ...d, company: e.target.value }))} style={{ width: '90px', padding: '2px 6px', fontSize: '11px', border: '1px solid rgba(255,255,255,0.12)', borderRadius: '4px', background: 'rgba(15,23,42,0.4)', color: '#e2e8f0' }} /></label>
+  <label style={{ display: 'flex', gap: '4px', alignItems: 'center', color: '#94a3b8' }}>Email<input value={previewMergeData.email} onChange={(e) => setPreviewMergeData((d) => ({ ...d, email: e.target.value }))} style={{ width: '120px', padding: '2px 6px', fontSize: '11px', border: '1px solid rgba(255,255,255,0.12)', borderRadius: '4px', background: 'rgba(15,23,42,0.4)', color: '#e2e8f0' }} /></label>
+  </div>
+  </div>
+  <iframe title="Email preview" srcDoc={activeHtml.replace(/\{\{\s*first_name\s*\}\}/gi, previewMergeData.first_name).replace(/\{\{\s*last_name\s*\}\}/gi, previewMergeData.last_name).replace(/\{\{\s*name\s*\}\}/gi, `${previewMergeData.first_name} ${previewMergeData.last_name}`).replace(/\{\{\s*company\s*\}\}/gi, previewMergeData.company).replace(/\{\{\s*email\s*\}\}/gi, previewMergeData.email).replace(/\{\{\s*unsubscribe_url\s*\}\}/gi, previewMergeData.unsubscribe_url)} />
+  </div>
+  )}
     </section>
   );
 }

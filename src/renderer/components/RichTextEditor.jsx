@@ -190,29 +190,22 @@ const EmailImage = Image.extend({
 });
 
 function RichTextEditor({
-  content,
-  onChange,
-  tokens = [],
-  onPickImage,
-  onPickAttachment,
-  onAiRewrite,
-  defaultSignature = '',
-  onSwitchMode,
-  onToggleTemplates,
-  showTemplates = false,
-  onToggleKeyboardHelp,
-  showKeyboardHelp = false,
-  previewMode = 'desktop',
-  onTogglePreviewMode,
-  variant = 'compose'
+  content, onChange, tokens = [], onPickImage, onPickAttachment, onAiRewrite,
+  defaultSignature = '', onSwitchMode, onToggleTemplates, showTemplates = false,
+  onToggleKeyboardHelp, showKeyboardHelp = false, previewMode = 'desktop',
+  onTogglePreviewMode, variant = 'compose', spellCheckEnabled = true
 }) {
   const [contextMenu, setContextMenu] = useState(null);
   const [linkPanel, setLinkPanel] = useState(null);
   const [imagePanel, setImagePanel] = useState(null);
+  const [attachmentPanel, setAttachmentPanel] = useState(null);
+  const [imageUrlValue, setImageUrlValue] = useState('');
   const [showAdvancedMenu, setShowAdvancedMenu] = useState(false);
   const [showColorMenu, setShowColorMenu] = useState(false);
   const [showWriteBrief, setShowWriteBrief] = useState(false);
+  const [showImageUrlPanel, setShowImageUrlPanel] = useState(false);
   const [writeBrief, setWriteBrief] = useState('');
+  const [spellCheck, setSpellCheck] = useState(spellCheckEnabled);
   const advancedMenuRef = useRef(null);
   const colorMenuRef = useRef(null);
 
@@ -421,8 +414,26 @@ function RichTextEditor({
     }
 
     const attachments = await onPickAttachment();
-    attachments.forEach((attachment) => {
-      const url = normalizeUrl(window.prompt(`Enter a URL to open when ${attachment.filename || 'this file'} is clicked`, attachment.url || 'https://') || '');
+    if (!attachments.length) {
+      return;
+    }
+
+    setAttachmentPanel({
+      attachments: attachments.map((attachment) => ({
+        ...attachment,
+        url: attachment.url || 'https://'
+      })),
+      index: 0
+    });
+  }, [editor, onPickAttachment]);
+
+  const applyAttachmentPanel = useCallback(() => {
+    if (!editor || !attachmentPanel) {
+      return;
+    }
+
+    attachmentPanel.attachments.forEach((attachment) => {
+      const url = normalizeUrl(attachment.url);
       const metadata = encodeURIComponent(JSON.stringify({ ...attachment, url }));
       const label = escapeHtml(attachment.filename || 'Attachment');
       const size = formatFileSize(attachment.size);
@@ -435,7 +446,9 @@ function RichTextEditor({
         `<p style="border:1px solid #d9e2ef;background:#f8fbff;border-radius:8px;padding:10px 12px;margin:12px 0;color:#24324b;font-size:13px;"><strong>Attachment</strong><br /><a ${anchorAttrs} style="color:#0066cc;text-decoration:underline;">${label}</a><span style="color:#667085;"> (${size})</span></p>`
       );
     });
-  }, [editor, insertHtml, onPickAttachment]);
+
+    setAttachmentPanel(null);
+  }, [editor, insertHtml, attachmentPanel]);
 
   const handleLinkInsert = useCallback(() => {
     if (!editor) {
@@ -748,6 +761,7 @@ function RichTextEditor({
                 <button type="button" onClick={() => { insertHtml('<hr style="border:none;border-top:1px solid #e1e5e9;margin:20px 0;" />'); setShowAdvancedMenu(false); }}>Insert divider</button>
                 <button type="button" onClick={() => { insertHtml('<div style="height:16px;"></div>'); setShowAdvancedMenu(false); }}>Insert spacer</button>
                 <button type="button" onClick={() => { handleImageInsert(); setShowAdvancedMenu(false); }}>Insert image</button>
+<button type="button" onClick={() => { setShowImageUrlPanel(true); setShowAdvancedMenu(false); }}>Insert image from URL</button>
                 <button type="button" onClick={() => { handleAttachmentInsert(); setShowAdvancedMenu(false); }}>Add attachment</button>
                 <div className="toolbar-dropdown-separator" />
                 <div className="toolbar-dropdown-label">Modes</div>
@@ -756,9 +770,12 @@ function RichTextEditor({
                 </button>
                 <button type="button" onClick={() => { onSwitchMode?.(); setShowAdvancedMenu(false); }}>HTML view</button>
                 <button type="button" onClick={() => { onToggleTemplates?.(); setShowAdvancedMenu(false); }}>Templates</button>
-                <button type="button" onClick={() => { onToggleKeyboardHelp?.(); setShowAdvancedMenu(false); }}>Keyboard help</button>
-                <div className="toolbar-dropdown-separator" />
-                <div className="toolbar-dropdown-label">History</div>
+<button type="button" onClick={() => { onToggleKeyboardHelp?.(); setShowAdvancedMenu(false); }}>Keyboard help</button>
+<div className="toolbar-dropdown-separator" />
+<div className="toolbar-dropdown-label">Spell check</div>
+<button type="button" onClick={() => { setSpellCheck((prev) => !prev); setShowAdvancedMenu(false); }}>{spellCheck ? 'Disable spell check' : 'Enable spell check'}</button>
+<div className="toolbar-dropdown-separator" />
+<div className="toolbar-dropdown-label">History</div>
                 <button type="button" onClick={() => { editor.chain().focus().undo().run(); setShowAdvancedMenu(false); }}>Undo</button>
                 <button type="button" onClick={() => { editor.chain().focus().redo().run(); setShowAdvancedMenu(false); }}>Redo</button>
                 <button type="button" onClick={() => { editor.chain().focus().unsetAllMarks().run(); setShowAdvancedMenu(false); }}>Clear formatting</button>
@@ -786,9 +803,35 @@ function RichTextEditor({
             <button type="button" className="primary-button sm" onClick={handleWriteCompleteEmail}>Generate email</button>
           </div>
         </div>
-      ) : null}
+) : null}
 
-      <div className="editor-content-wrapper">
+{showImageUrlPanel ? (
+<div className="image-url-panel">
+<input
+type="url"
+value={imageUrlValue}
+onChange={(event) => setImageUrlValue(event.target.value)}
+placeholder="https://example.com/image.png"
+onKeyDown={(event) => {
+if (event.key === 'Enter' && imageUrlValue.trim() && editor) {
+editor.chain().focus().setImage({ src: imageUrlValue.trim(), alt: 'Image', width: 360 }).run();
+setImageUrlValue('');
+setShowImageUrlPanel(false);
+}
+}}
+/>
+<button type="button" className="primary-button sm" onClick={() => {
+if (imageUrlValue.trim() && editor) {
+editor.chain().focus().setImage({ src: imageUrlValue.trim(), alt: 'Image', width: 360 }).run();
+setImageUrlValue('');
+setShowImageUrlPanel(false);
+}
+}}>Insert</button>
+<button type="button" className="ghost-button sm" onClick={() => { setShowImageUrlPanel(false); setImageUrlValue(''); }}>Cancel</button>
+</div>
+) : null}
+
+<div className="editor-content-wrapper" spellCheck={spellCheck ? 'true' : undefined}>
         {variant === 'compose' && (!content || content === '<p></p>') ? (
           <div className="editor-placeholder">Type your message...</div>
         ) : null}
@@ -852,6 +895,47 @@ function RichTextEditor({
           </label>
           <button type="button" className="ghost-button sm" onClick={() => setLinkPanel(null)}>Cancel</button>
           <button type="button" className="primary-button sm" onClick={applyLinkPanel}>Apply</button>
+        </div>
+      ) : null}
+
+      {attachmentPanel ? (
+        <div className="attachment-insert-panel">
+          <div className="attachment-insert-head">
+            <strong>Attachment link URLs</strong>
+            <button type="button" className="ghost-button sm" onClick={() => setAttachmentPanel(null)}>Cancel</button>
+          </div>
+{attachmentPanel.attachments.map((attachment, index) => (
+<div key={index} className="attachment-insert-row">
+<div className="attachment-insert-info">
+{attachment.contentType?.startsWith('image/') && attachment.content ? (
+<div className="attachment-preview-thumb">
+<img src={`data:${attachment.contentType};base64,${attachment.content}`} alt={attachment.filename} />
+</div>
+) : attachment.contentType === 'application/pdf' ? (
+<div className="attachment-preview-thumb">PDF</div>
+) : null}
+<span className="attachment-insert-name">{attachment.filename || 'Attachment'}</span>
+<span className="attachment-insert-size">{formatFileSize(attachment.size)}</span>
+</div>
+              <label>
+                Link URL
+                <input
+                  type="url"
+                  value={attachment.url}
+                  onChange={(event) => {
+                    const next = [...attachmentPanel.attachments];
+                    next[index] = { ...next[index], url: event.target.value };
+                    setAttachmentPanel({ ...attachmentPanel, attachments: next });
+                  }}
+                  placeholder="https://example.com/page"
+                />
+              </label>
+            </div>
+          ))}
+          <p className="attachment-insert-hint">When a recipient clicks the attachment, they will be taken to this URL. Leave blank for a standard file download.</p>
+          <div className="attachment-insert-actions">
+            <button type="button" className="primary-button sm" onClick={applyAttachmentPanel}>Insert attachments</button>
+          </div>
         </div>
       ) : null}
 

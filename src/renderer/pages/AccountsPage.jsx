@@ -9,6 +9,7 @@ const initialForm = {
   primaryProtocol: 'smtp',
   email: '',
   displayName: '',
+  replyTo: '',
   username: '',
   password: '',
   host: '',
@@ -256,10 +257,14 @@ function AccountsPage() {
               Email
               <input value={form.email} onChange={(event) => setForm({ ...form, email: event.target.value })} />
             </label>
-            <label>
-              Name
-              <input value={form.displayName} onChange={(event) => setForm({ ...form, displayName: event.target.value })} />
-            </label>
+<label>
+Name
+<input value={form.displayName} onChange={(event) => setForm({ ...form, displayName: event.target.value })} />
+</label>
+<label className="reply-to-field">
+Reply-to
+<input type="email" value={form.replyTo} onChange={(event) => setForm({ ...form, replyTo: event.target.value })} placeholder="Optional reply-to address" />
+</label>
             <label>
               Protocol
               <select value={form.primaryProtocol} onChange={(event) => setForm({ ...form, primaryProtocol: event.target.value })}>

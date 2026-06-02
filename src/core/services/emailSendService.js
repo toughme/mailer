@@ -41,16 +41,35 @@ function extractSendDirectives(html) {
         attachments.push({
           filename: attachment.filename,
           content: Buffer.from(attachment.content, 'base64'),
-          contentType: attachment.contentType || 'application/octet-stream'
+          contentType: attachment.contentType || 'application/octet-stream',
+          url: attachment.url || ''
         });
       }
     } catch {
-      // Ignore malformed attachment metadata and leave the visible fallback out of the sent body.
+      // Ignore malformed attachment metadata
     }
     return '';
   });
 
   cleanHtml = cleanHtml.replace(/<div\b[^>]*data-pm-attachment-card=["']true["'][^>]*>[\s\S]*?<\/div>/gi, '');
+
+  const attachmentLinkHtml = attachments
+    .filter((attachment) => attachment.url)
+    .map((attachment) => {
+      const label = String(attachment.filename || 'Attachment').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+      return `<p style="margin:6px 0;"><a href="${String(attachment.url).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;')}" target="_blank" rel="noreferrer noopener" style="color:#0066cc;text-decoration:underline;">${label}</a></p>`;
+    })
+    .join('');
+
+  if (attachmentLinkHtml) {
+    const insertion = `<div style="border-top:1px solid #e1e5e9;margin-top:24px;padding-top:12px;"><strong style="font-size:13px;color:#374151;">Attachments</strong>${attachmentLinkHtml}</div>`;
+    const bodyClose = cleanHtml.lastIndexOf('</body>');
+    if (bodyClose !== -1) {
+      cleanHtml = cleanHtml.slice(0, bodyClose) + insertion + cleanHtml.slice(bodyClose);
+    } else {
+      cleanHtml += insertion;
+    }
+  }
 
   const confidential = /data-pm-confidential=["']true["']|pm-confidential:true/i.test(cleanHtml);
 
@@ -191,23 +210,28 @@ function createEmailSendService({ db, security, proxyService, microsoftOauthServ
         return sendGraphMessage(account, personalizedSubject, personalizedHtml, text, directives, previewText, recipient, fromAddress);
       }
 
-      const transporter = await buildTransport(account, password);
-      const info = await transporter.sendMail({
-        from: `"${fromName}" <${fromAddress}>`,
-        to: recipient.name ? `"${recipient.name}" <${recipient.email}>` : recipient.email,
-        subject: personalizedSubject,
-        text,
-        html: personalizedHtml,
-        headers: {
-          ...(directives.confidential ? {
-            Sensitivity: 'Company-Confidential',
-            Importance: 'high',
-            'X-PM-Confidential': 'true'
-          } : {})
-        },
-        ...(directives.attachments.length ? { attachments: directives.attachments } : {}),
-        ...(previewText ? { 'X-Preview-Text': applyTokens(previewText, recipient) } : {})
-      });
+    const transporter = await buildTransport(account, password);
+    const mailOptions = {
+      from: `"${fromName}" <${fromAddress}>`,
+      to: recipient.name ? `"${recipient.name}" <${recipient.email}>` : recipient.email,
+      subject: personalizedSubject,
+      text,
+      html: personalizedHtml,
+      headers: {
+        ...(directives.confidential ? {
+          Sensitivity: 'Company-Confidential',
+          Importance: 'high',
+          'X-PM-Confidential': 'true'
+        } : {})
+      },
+      ...(directives.attachments.length ? { attachments: directives.attachments } : {}),
+      ...(previewText ? { 'X-Preview-Text': applyTokens(previewText, recipient) } : {})
+    };
+    const replyTo = settings.replyTo || account.reply_to;
+    if (replyTo) {
+      mailOptions.replyTo = replyTo;
+    }
+    const info = await transporter.sendMail(mailOptions);
 
       return {
         messageId: info.messageId,

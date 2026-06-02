@@ -323,24 +323,17 @@ function registerIpcHandlers(ipcMain, runtime, app, mainWindow) {
           }
         }, 300000);
 
-        const onOpenError = (error) => {
-          if (!completed) {
-            clearTimeout(timeoutHandle);
-            completed = true;
-            cleanup();
-            reject(new Error(`Failed to open Microsoft authorization page: ${error?.message || error || 'unknown error'}`));
-          }
-        };
-
-        console.log('[OAuth] Opening Microsoft auth URL in external browser:', authorization.url.split('?')[0]);
-        try {
-          const openResult = shell.openExternal(authorization.url, {}, onOpenError);
-          if (openResult && typeof openResult.then === 'function') {
-            openResult.catch(onOpenError);
-          }
-        } catch (openError) {
-          onOpenError(openError);
+      console.log('[OAuth] Opening Microsoft auth URL in external browser:', authorization.url.split('?')[0]);
+      try {
+        await shell.openExternal(authorization.url);
+      } catch (openError) {
+        if (!completed) {
+          clearTimeout(timeoutHandle);
+          completed = true;
+          cleanup();
+          reject(new Error(`Failed to open Microsoft authorization page: ${openError?.message || openError || 'unknown error'}`));
         }
+      }
       });
 
       return { ok: true, data: result };

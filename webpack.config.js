@@ -23,7 +23,7 @@ module.exports = (env, argv) => {
             loader: 'babel-loader',
             options: {
               presets: [
-                ['@babel/preset-env', { targets: { electron: '25' } }],
+                ['@babel/preset-env', { targets: { electron: '42' } }],
                 '@babel/preset-react'
               ]
             }
@@ -35,7 +35,7 @@ module.exports = (env, argv) => {
         }
       ]
     },
-    target: 'web',
+    target: 'electron-renderer',
     mode: argv.mode || 'development',
   optimization: {
     minimize: isProduction,
