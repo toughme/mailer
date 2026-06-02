@@ -3,7 +3,11 @@ const https = require('https');
 const { URL, URLSearchParams } = require('url');
 
 const MS_AUTHORITY = 'https://login.microsoftonline.com/common';
-const DEFAULT_SCOPE = 'https://outlook.office365.com/IMAP.AccessAsUser.All https://outlook.office365.com/SMTP.Send offline_access openid profile';
+const GRAPH_API_BASE = 'https://graph.microsoft.com/v1.0';
+// Override these environment variables to use a different Azure app or redirect URI.
+const DEFAULT_SCOPE = process.env.MICROSOFT_OAUTH_SCOPES || 'offline_access openid profile email Mail.Send';
+const CLIENT_ID = process.env.MICROSOFT_OAUTH_CLIENT_ID || 'e9a7fea1-1cc0-4cd9-a31b-9137ca5deedd';
+const REDIRECT_URI = process.env.MICROSOFT_OAUTH_REDIRECT_URI || 'com.emclient.MailClient://oauth';
 const TOKEN_REFRESH_BUFFER_MS = 120000;
 
 function buildUrl(base, params) {
@@ -64,9 +68,7 @@ function generateCodeChallenge(verifier) {
 }
 
 function createMicrosoftOauthService({ db, security, eventLogService }) {
-  const clientId = 'e9a7fea1-1cc0-4cd9-a31b-9137ca5deedd';
-  const redirectUri = 'com.emclient.MailClient://oauth';
-  let pendingAuthorization = null;
+
 
   function log(level, message, details) {
     const prefix = '[MicrosoftOAuth]';
@@ -93,9 +95,9 @@ function createMicrosoftOauthService({ db, security, eventLogService }) {
 
   function buildAuthUrl(state, codeChallenge) {
     const params = {
-      client_id: clientId,
+      client_id: CLIENT_ID,
       response_type: 'code',
-      redirect_uri: redirectUri,
+      redirect_uri: REDIRECT_URI,
       response_mode: 'query',
       scope: DEFAULT_SCOPE,
       state,
@@ -130,6 +132,9 @@ function createMicrosoftOauthService({ db, security, eventLogService }) {
     const now = new Date();
     const expiresAt = new Date(now.getTime() + Number(result.expires_in || 3600) * 1000).toISOString();
 
+    const existingRow = await getAccountRow(accountId);
+    const refreshToken = result.refresh_token || (existingRow?.oauth_refresh_token ? security.decrypt(existingRow.oauth_refresh_token) : '');
+
     await db.run(
       `UPDATE accounts SET
         oauth_access_token = ?,
@@ -138,14 +143,11 @@ function createMicrosoftOauthService({ db, security, eventLogService }) {
         oauth_scope = ?,
         oauth_token_type = ?,
         connection_status = 'connected',
-        host = 'outlook.office365.com',
-        port = 993,
-        secure = 1,
         updated_at = CURRENT_TIMESTAMP
       WHERE id = ?`,
       [
         security.encrypt(result.access_token),
-        security.encrypt(result.refresh_token || ''),
+        security.encrypt(refreshToken),
         expiresAt,
         result.scope || DEFAULT_SCOPE,
         result.token_type || 'Bearer',
@@ -156,7 +158,8 @@ function createMicrosoftOauthService({ db, security, eventLogService }) {
     log('info', 'Token saved for account', {
       accountId,
       expiresAt,
-      hasRefreshToken: Boolean(result.refresh_token),
+      hasRefreshToken: Boolean(refreshToken),
+      preservedRefreshToken: !result.refresh_token && Boolean(existingRow?.oauth_refresh_token),
       scopeCount: (result.scope || '').split(' ').length
     });
   }
@@ -195,14 +198,63 @@ function createMicrosoftOauthService({ db, security, eventLogService }) {
     return response.body;
   }
 
+  async function callGraphApi(accessToken, method, path, body = null) {
+    const requestBody = body ? JSON.stringify(body) : null;
+    const headers = {
+      Authorization: `Bearer ${accessToken}`
+    };
+    if (requestBody) {
+      headers['Content-Type'] = 'application/json';
+      headers['Content-Length'] = Buffer.byteLength(requestBody);
+    }
+
+    const parsedUrl = new URL(path, GRAPH_API_BASE);
+    const options = {
+      method,
+      hostname: parsedUrl.hostname,
+      path: parsedUrl.pathname + parsedUrl.search,
+      headers
+    };
+
+    return httpRequest(options, requestBody);
+  }
+
+  function getGraphEmail(data) {
+    return String(data?.mail || data?.userPrincipalName || data?.preferredEmail || data?.id || '').toLowerCase();
+  }
+
+  async function verifyGraphAccess(accountId) {
+    const account = await ensureAccountHasOAuth(accountId);
+    const accessToken = await getAccessToken(account);
+    const response = await callGraphApi(accessToken, 'GET', `${GRAPH_API_BASE}/me`);
+    const data = response.body || {};
+    const email = getGraphEmail(data) || account.email;
+    const ok = Boolean(email);
+    await updateConnectionStatus(accountId, ok ? 'connected' : 'error', ok ? null : 'Graph verification failed');
+    if (ok && email && email !== account.email) {
+      await db.run(
+        `UPDATE accounts SET email = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`,
+        [email, Number(accountId)]
+      );
+    }
+    return { ok, email };
+  }
+
+  async function sendGraphMail(accountId, mailPayload) {
+    const account = await ensureAccountHasOAuth(accountId);
+    const accessToken = await getAccessToken(account);
+    const response = await callGraphApi(accessToken, 'POST', `${GRAPH_API_BASE}/me/sendMail`, mailPayload);
+    return response;
+  }
+
   async function exchangeCode(code, codeVerifier) {
     log('info', 'Exchanging authorization code for tokens');
 
     const params = {
-      client_id: clientId,
+      client_id: CLIENT_ID,
       grant_type: 'authorization_code',
       code,
-      redirect_uri: redirectUri,
+      redirect_uri: REDIRECT_URI,
       scope: DEFAULT_SCOPE
     };
     if (codeVerifier) {
@@ -232,7 +284,7 @@ function createMicrosoftOauthService({ db, security, eventLogService }) {
 
     try {
       const result = await postForm(`${MS_AUTHORITY}/oauth2/v2.0/token`, {
-        client_id: clientId,
+        client_id: CLIENT_ID,
         grant_type: 'refresh_token',
         refresh_token: existingRefreshToken,
         scope: DEFAULT_SCOPE
@@ -320,14 +372,14 @@ function createMicrosoftOauthService({ db, security, eventLogService }) {
     return account;
   }
 
-  function buildXOAuth2Token(user, accessToken) {
+  function buildXOAuth2TokenInternal(user, accessToken) {
     const authString = `user=${user}\x01auth=Bearer ${accessToken}\x01\x01`;
     return Buffer.from(authString, 'utf8').toString('base64');
   }
 
   return {
     getRedirectUri() {
-      return redirectUri;
+      return REDIRECT_URI;
     },
 
     getScope() {
@@ -352,7 +404,7 @@ function createMicrosoftOauthService({ db, security, eventLogService }) {
         accountId,
         statePrefix: state.substring(0, 8),
         hasPKCE: true,
-        redirectUri
+        redirectUri: REDIRECT_URI
       });
 
       return { url, state };
@@ -449,16 +501,14 @@ function createMicrosoftOauthService({ db, security, eventLogService }) {
         );
       }
 
-      const imapOk = await verifyImapXOAuth2(userEmail || (await getAccountRow(accountId)).email, accessToken);
-
-      if (!imapOk) {
-        log('warn', 'IMAP XOAUTH2 verification failed after token exchange - tokens saved but connection may need retry', { accountId });
-        await updateConnectionStatus(accountId, 'error', 'IMAP XOAUTH2 verification failed');
+      const graphVerification = await verifyGraphAccess(accountId);
+      if (!graphVerification.ok) {
+        log('warn', 'Graph verification failed after token exchange - tokens saved but connection may need retry', { accountId });
       } else {
-        log('info', 'IMAP XOAUTH2 verification successful', { accountId, email: userEmail });
+        log('info', 'Graph verification successful', { accountId, email: graphVerification.email });
       }
 
-      log('info', 'Microsoft OAuth authorization completed', { accountId, email: userEmail });
+      log('info', 'Microsoft Graph authorization completed', { accountId, email: graphVerification.email || userEmail });
 
       const updatedAccount = await getAccountRow(accountId);
       return {
@@ -466,7 +516,7 @@ function createMicrosoftOauthService({ db, security, eventLogService }) {
         email: updatedAccount.email || userEmail,
         expiresAt: updatedAccount.oauth_expires_at,
         scope: updatedAccount.oauth_scope,
-        connected: imapOk
+        connected: graphVerification.ok
       };
     },
 
@@ -476,15 +526,11 @@ function createMicrosoftOauthService({ db, security, eventLogService }) {
     },
 
     async verifyConnection(accountId) {
-      const account = await ensureAccountHasOAuth(accountId);
-      const accessToken = await getAccessToken(account);
-      const ok = await verifyImapXOAuth2(account.email, accessToken);
-      await updateConnectionStatus(accountId, ok ? 'connected' : 'error', ok ? null : 'IMAP XOAUTH2 verification failed');
-      return { ok, email: account.email };
+      return verifyGraphAccess(accountId);
     },
 
     buildXOAuth2Token(user, accessToken) {
-      return buildXOAuth2Token(user, accessToken);
+      return buildXOAuth2TokenInternal(user, accessToken);
     },
 
     async getSmtpTransportConfig(accountId) {
@@ -520,6 +566,12 @@ function createMicrosoftOauthService({ db, security, eventLogService }) {
         connectionTimeout: 30000,
         tlsOptions: { rejectUnauthorized: false, minVersion: 'TLSv1.2' }
       };
+    },
+
+    async sendMail(accountId, mailPayload) {
+      const account = await ensureAccountHasOAuth(accountId);
+      const accessToken = await getAccessToken(account);
+      return callGraphApi(accessToken, 'POST', `${GRAPH_API_BASE}/me/sendMail`, mailPayload);
     }
   };
 }

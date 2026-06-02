@@ -103,6 +103,55 @@ function createEmailSendService({ db, security, proxyService, microsoftOauthServ
     });
   }
 
+  async function sendGraphMessage(account, personalizedSubject, personalizedHtml, text, directives, previewText, recipient, fromAddress) {
+    const message = {
+      message: {
+        subject: personalizedSubject,
+        body: {
+          contentType: 'HTML',
+          content: personalizedHtml
+        },
+        toRecipients: [
+          {
+            emailAddress: {
+              address: recipient.email,
+              name: recipient.name || undefined
+            }
+          }
+        ]
+      },
+      saveToSentItems: false
+    };
+
+    if (directives.confidential) {
+      message.message.sensitivity = 'companyConfidential';
+      message.message.importance = 'high';
+    }
+
+    const headers = [];
+    if (previewText) {
+      headers.push({ name: 'X-Preview-Text', value: applyTokens(previewText, recipient) });
+    }
+    if (headers.length) {
+      message.message.internetMessageHeaders = headers;
+    }
+
+    if (directives.attachments.length) {
+      message.message.attachments = directives.attachments.map((attachment) => ({
+        '@odata.type': '#microsoft.graph.fileAttachment',
+        name: attachment.filename,
+        contentType: attachment.contentType,
+        contentBytes: attachment.content.toString('base64')
+      }));
+    }
+
+    const response = await microsoftOauthService.sendMail(account.id, message);
+    return {
+      messageId: response.headers?.['request-id'] || response.headers?.['x-ms-request-id'] || null,
+      accountEmail: fromAddress
+    };
+  }
+
   return {
     applyTokens,
 
@@ -137,12 +186,12 @@ function createEmailSendService({ db, security, proxyService, microsoftOauthServ
       const text = stripHtml(personalizedHtml);
       const fromName = account.display_name || account.provider || account.email;
       const fromAddress = account.email;
-      const unsubscribeMailto = `<mailto:${fromAddress}?subject=unsubscribe>`;
 
-      const transporter = protocol === 'graph'
-        ? await buildOAuthTransport(account)
-        : await buildTransport(account, password);
+      if (protocol === 'graph') {
+        return sendGraphMessage(account, personalizedSubject, personalizedHtml, text, directives, previewText, recipient, fromAddress);
+      }
 
+      const transporter = await buildTransport(account, password);
       const info = await transporter.sendMail({
         from: `"${fromName}" <${fromAddress}>`,
         to: recipient.name ? `"${recipient.name}" <${recipient.email}>` : recipient.email,
@@ -150,10 +199,6 @@ function createEmailSendService({ db, security, proxyService, microsoftOauthServ
         text,
         html: personalizedHtml,
         headers: {
-          'List-Unsubscribe': unsubscribeMailto,
-          'List-Unsubscribe-Post': 'List-Unsubscribe=One-Click',
-          Precedence: 'bulk',
-          'X-Auto-Response-Suppress': 'All',
           ...(directives.confidential ? {
             Sensitivity: 'Company-Confidential',
             Importance: 'high',

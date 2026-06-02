@@ -217,6 +217,7 @@ function createSendQueueService({
         recipients = shuffleArray(recipients);
       }
 
+      const insertBatchSize = 100;
       for (let index = 0; index < recipients.length; index += 1) {
         const recipient = recipients[index];
         const variant = pickVariant(campaign, index);
@@ -235,6 +236,10 @@ function createSendQueueService({
             variant.variant
           ]
         );
+
+        if (index > 0 && index % insertBatchSize === 0) {
+          await sleep(0);
+        }
       }
 
       await db.run(

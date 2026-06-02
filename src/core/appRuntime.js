@@ -196,11 +196,38 @@ function registerIpcHandlers(ipcMain, runtime, app, mainWindow) {
   })));
 
   ipcMain.handle('accounts:graph-authorize', wrapHandler(async (payload) => {
-      if (!payload?.id) {
+      let accountId = payload?.id;
+      
+      // If create flag is set, first create the account, then authorize it
+      if (payload?.create) {
+        const accountFormData = {
+          email: payload.email,
+          displayName: payload.displayName,
+          provider: payload.provider || 'Microsoft OAuth',
+          primaryProtocol: 'graph',
+          host: '',
+          port: 0,
+          secure: true,
+          username: '',
+          password: '', // Not used for OAuth
+          proxyProfileId: payload.proxyProfileId || '',
+          notes: payload.notes || '',
+          connection_status: 'pending'
+        };
+        const createdAccounts = await services.accountsService.create(accountFormData);
+        const newAccount = createdAccounts.find((acc) => acc.email === payload.email && acc.primaryProtocol === 'graph');
+        if (!newAccount) {
+          throw new Error('Failed to create OAuth account.');
+        }
+        accountId = newAccount.id;
+        console.log('[OAuth] Created new account:', accountId, 'for', payload.email);
+      }
+      
+      if (!accountId) {
         throw new Error('Account id is required for Microsoft Graph authorization.');
       }
 
-      const account = await services.accountsService.getById(payload.id);
+      const account = await services.accountsService.getById(accountId);
       if (!account) {
         throw new Error('Account not found.');
       }
@@ -209,82 +236,57 @@ function registerIpcHandlers(ipcMain, runtime, app, mainWindow) {
         throw new Error('Microsoft Graph authorization is only available for Graph accounts.');
       }
 
-      const authorization = services.microsoftOauthService.createAuthorization(payload.id);
+      const authorization = services.microsoftOauthService.createAuthorization(accountId);
       const callbackUri = services.microsoftOauthService.getRedirectUri();
 
-      console.log('[OAuth] Starting authorization for account', payload.id, 'callback:', callbackUri);
+      console.log('[OAuth] Starting authorization for account', accountId, 'callback:', callbackUri);
 
       const result = await new Promise((resolve, reject) => {
         let completed = false;
         let callbackProcessed = false;
-        const authWindow = new BrowserWindow({
-          parent: mainWindow || null,
-          modal: Boolean(mainWindow),
-          show: false,
-          width: 900,
-          height: 760,
-          webPreferences: {
-            nodeIntegration: false,
-            contextIsolation: true,
-            sandbox: false
-          }
-        });
-
-        authWindow.removeMenu();
-        authWindow.once('ready-to-show', () => authWindow.show());
-
-        authWindow.webContents.setWindowOpenHandler(({ url }) => {
-          console.log('[OAuth] Window open requested for:', url.split('?')[0]);
-          const isMicrosoftAuthUrl = typeof url === 'string' && (
-            url.includes('login.microsoftonline.com') ||
-            url.includes('login.live.com') ||
-            url.includes('consent.microsoftonline.com')
-          );
-
-          if (isMicrosoftAuthUrl) {
-            console.log('[OAuth] Loading Microsoft auth popup URL in same window');
-            authWindow.loadURL(url).catch((loadError) => {
-              console.error('[OAuth] Failed to load auth popup URL:', loadError.message);
-            });
-            return { action: 'deny' };
-          }
-
-          console.log('[OAuth] Opening external URL:', url.split('?')[0]);
-          shell.openExternal(url).catch(() => {});
-          return { action: 'deny' };
-        });
 
         const cleanup = () => {
-          try {
-            if (!authWindow.isDestroyed()) {
-              authWindow.close();
-            }
-          } catch (cleanupError) {
-            console.warn('Cleanup error after Microsoft OAuth:', cleanupError.message);
-          }
           global.oauthCallbackHandler = null;
         };
 
         const handleCallbackUrl = async (url) => {
+          console.log('[OAuth] handleCallbackUrl called with:', url?.substring(0, 200));
           if (!url || callbackProcessed) {
+            console.log('[OAuth] Ignoring callback because URL is missing or already processed:', { url, callbackProcessed });
             return false;
           }
 
-          const urlBase = url.split('#')[0].split('?')[0];
-          if (urlBase !== callbackUri && !url.startsWith(callbackUri)) {
+          const normalizeUri = (value) => String(value || '').trim().replace(/\/+$|^\s+|\s+$/g, '').toLowerCase();
+          const urlBase = url.split('#')[0].split('?')[0].replace(/\/+$/, '');
+          const normalizedUrlBase = normalizeUri(urlBase);
+          const normalizedCallbackUri = normalizeUri(callbackUri);
+
+          if (!normalizedUrlBase.startsWith(normalizedCallbackUri)) {
+            console.log('[OAuth] URL does not match callback URI; skipping:', {
+              urlBase,
+              callbackUri,
+              normalizedUrlBase,
+              normalizedCallbackUri
+            });
             return false;
           }
 
           callbackProcessed = true;
-          console.log('[OAuth] Intercepted callback URL:', url.substring(0, 80));
+          console.log('[OAuth] Intercepted callback URL:', url.substring(0, 200));
 
           try {
             const authResult = await services.microsoftOauthService.handleCallbackUrl(url);
+            console.log('[OAuth] Callback handled successfully for URL:', url.substring(0, 200));
             completed = true;
             resolve(authResult);
             cleanup();
             return true;
           } catch (error) {
+            console.error('[OAuth] Error while handling callback URL:', {
+              url: url.substring(0, 200),
+              message: error?.message || error,
+              stack: error?.stack
+            });
             completed = true;
             reject(error);
             cleanup();
@@ -297,53 +299,20 @@ function registerIpcHandlers(ipcMain, runtime, app, mainWindow) {
           handleCallbackUrl(url);
         };
 
-        const webContents = authWindow.webContents;
-
-        webContents.on('will-redirect', (event, url) => {
-          console.log('[OAuth] will-redirect event:', url.substring(0, 80));
-          if (handleCallbackUrl(url)) {
-            event.preventDefault();
-          }
-        });
-
-        webContents.on('will-navigate', (event, url) => {
-          console.log('[OAuth] will-navigate event:', url.substring(0, 80));
-          if (handleCallbackUrl(url)) {
-            event.preventDefault();
-          }
-        });
-
-        webContents.on('did-navigate', (event, url, httpResponseCode, httpStatusText) => {
-          console.log('[OAuth] did-navigate event:', url.substring(0, 80), 'status:', httpResponseCode);
-          handleCallbackUrl(url);
-        });
-
-        webContents.on('did-navigate-in-page', (event, url, isMainFrame, frameProcessId, frameRoutingId) => {
-          if (!isMainFrame) return;
-          console.log('[OAuth] did-navigate-in-page event:', url.substring(0, 80));
-          handleCallbackUrl(url);
-        });
-
-        webContents.on('did-fail-load', (event, errorCode, errorDescription, validatedURL, isMainFrame) => {
-          console.log('[OAuth] did-fail-load:', { errorCode, errorDescription, url: validatedURL?.substring(0, 80), isMainFrame });
-          if (validatedURL && isMainFrame !== false) {
-            const urlBase = validatedURL.split('#')[0].split('?')[0];
-            if (urlBase === callbackUri || validatedURL.startsWith(callbackUri)) {
-              console.log('[OAuth] Custom protocol callback failed to load (expected) - processing callback');
-              if (!completed) {
-                handleCallbackUrl(validatedURL);
-              }
+        // If any protocol callbacks arrived before the handler was registered,
+        // process them now.
+        if (global._pendingProtocolUrls && global._pendingProtocolUrls.length) {
+          console.log('[OAuth] Processing queued protocol URLs:', global._pendingProtocolUrls.length);
+          const queued = global._pendingProtocolUrls.slice();
+          global._pendingProtocolUrls = [];
+          queued.forEach((queuedUrl) => {
+            try {
+              global.oauthCallbackHandler(queuedUrl);
+            } catch (queuedError) {
+              console.warn('[OAuth] Error processing queued protocol URL:', queuedError?.message || queuedError);
             }
-          }
-        });
-
-        webContents.on('did-navigate', (event, url) => {
-          if (url && url.includes('#') && url.split('#')[0] === callbackUri) {
-            console.log('[OAuth] Fragment-based callback detected in did-navigate');
-            const fullCallbackUrl = url;
-            handleCallbackUrl(fullCallbackUrl);
-          }
-        });
+          });
+        }
 
         const timeoutHandle = setTimeout(() => {
           if (!completed) {
@@ -354,23 +323,24 @@ function registerIpcHandlers(ipcMain, runtime, app, mainWindow) {
           }
         }, 300000);
 
-        authWindow.on('closed', () => {
-          clearTimeout(timeoutHandle);
-          if (!completed) {
-            console.log('[OAuth] Authorization window closed by user');
-            reject(new Error('Microsoft Graph authorization window was closed before completion.'));
-          }
-        });
-
-        console.log('[OAuth] Loading authorization URL:', authorization.url.split('?')[0]);
-        authWindow.loadURL(authorization.url).catch((loadError) => {
+        const onOpenError = (error) => {
           if (!completed) {
             clearTimeout(timeoutHandle);
             completed = true;
             cleanup();
-            reject(new Error(`Failed to open Microsoft Graph authorization window: ${loadError.message}`));
+            reject(new Error(`Failed to open Microsoft authorization page: ${error?.message || error || 'unknown error'}`));
           }
-        });
+        };
+
+        console.log('[OAuth] Opening Microsoft auth URL in external browser:', authorization.url.split('?')[0]);
+        try {
+          const openResult = shell.openExternal(authorization.url, {}, onOpenError);
+          if (openResult && typeof openResult.then === 'function') {
+            openResult.catch(onOpenError);
+          }
+        } catch (openError) {
+          onOpenError(openError);
+        }
       });
 
       return { ok: true, data: result };

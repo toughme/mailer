@@ -9,6 +9,17 @@ import Highlight from '@tiptap/extension-highlight';
 import Color from '@tiptap/extension-color';
 import TextAlign from '@tiptap/extension-text-align';
 
+const AttachmentLink = Link.extend({
+  addAttributes() {
+    return {
+      ...this.parent?.(),
+      'data-pm-attachment': {
+        default: null
+      }
+    };
+  }
+});
+
 const Underline = Mark.create({
   name: 'underline',
 
@@ -221,7 +232,7 @@ function RichTextEditor({
           class: 'email-image'
         }
       }),
-      Link.configure({
+      AttachmentLink.configure({
         openOnClick: false,
         HTMLAttributes: {
           class: 'email-link',
@@ -362,6 +373,17 @@ function RichTextEditor({
     insertHtml(token);
   }, [insertHtml]);
 
+  function normalizeUrl(value) {
+    const url = String(value || '').trim();
+    if (!url) {
+      return '';
+    }
+    if (/^(https?:|mailto:|tel:|file:)/i.test(url)) {
+      return url;
+    }
+    return `https://${url}`;
+  }
+
   const handleImageInsert = useCallback(async () => {
     if (!editor) {
       return;
@@ -400,11 +422,17 @@ function RichTextEditor({
 
     const attachments = await onPickAttachment();
     attachments.forEach((attachment) => {
-      const metadata = encodeURIComponent(JSON.stringify(attachment));
+      const url = normalizeUrl(window.prompt(`Enter a URL to open when ${attachment.filename || 'this file'} is clicked`, attachment.url || 'https://') || '');
+      const metadata = encodeURIComponent(JSON.stringify({ ...attachment, url }));
       const label = escapeHtml(attachment.filename || 'Attachment');
       const size = formatFileSize(attachment.size);
+      const href = url || '#';
+      const anchorAttrs = url
+        ? `href="${escapeHtml(href)}" target="_blank" rel="noreferrer noopener" data-pm-attachment="${metadata}"`
+        : `href="#" data-pm-attachment="${metadata}"`;
+
       insertHtml(
-        `<div data-pm-attachment-card="true" style="border:1px solid #d9e2ef;background:#f8fbff;border-radius:8px;padding:10px 12px;margin:12px 0;color:#24324b;font-size:13px;"><strong>Attachment</strong><br /><a href="#" data-pm-attachment="${metadata}" style="color:#0066cc;text-decoration:underline;">${label}</a><span style="color:#667085;"> (${size})</span></div>`
+        `<p style="border:1px solid #d9e2ef;background:#f8fbff;border-radius:8px;padding:10px 12px;margin:12px 0;color:#24324b;font-size:13px;"><strong>Attachment</strong><br /><a ${anchorAttrs} style="color:#0066cc;text-decoration:underline;">${label}</a><span style="color:#667085;"> (${size})</span></p>`
       );
     });
   }, [editor, insertHtml, onPickAttachment]);
@@ -686,8 +714,8 @@ function RichTextEditor({
           <button type="button" onClick={handleLinkInsert} className={editor.isActive('link') ? 'toolbar-btn active' : 'toolbar-btn'} title="Add or edit link">
             🔗
           </button>
-          <button type="button" onClick={handleImageInsert} className="toolbar-btn" title="Insert image">
-            🖼
+          <button type="button" onClick={handleAttachmentInsert} className="toolbar-btn" title="Attach file">
+            📎
           </button>
           <div className="toolbar-spacer" />
           <button type="button" onClick={() => editor.chain().focus().undo().run()} className="toolbar-btn" title="Undo (Ctrl+Z)">
@@ -719,6 +747,7 @@ function RichTextEditor({
                 <button type="button" onClick={() => { insertButton(); setShowAdvancedMenu(false); }}>Insert button</button>
                 <button type="button" onClick={() => { insertHtml('<hr style="border:none;border-top:1px solid #e1e5e9;margin:20px 0;" />'); setShowAdvancedMenu(false); }}>Insert divider</button>
                 <button type="button" onClick={() => { insertHtml('<div style="height:16px;"></div>'); setShowAdvancedMenu(false); }}>Insert spacer</button>
+                <button type="button" onClick={() => { handleImageInsert(); setShowAdvancedMenu(false); }}>Insert image</button>
                 <button type="button" onClick={() => { handleAttachmentInsert(); setShowAdvancedMenu(false); }}>Add attachment</button>
                 <div className="toolbar-dropdown-separator" />
                 <div className="toolbar-dropdown-label">Modes</div>

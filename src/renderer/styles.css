@@ -3582,6 +3582,22 @@ textarea {
   min-height: 0;
 }
 
+.compose-stage.ai-busy,
+.email-stage.ai-busy {
+  outline: 2px solid rgba(59, 130, 246, 0.95);
+  outline-offset: 4px;
+  animation: ai-border-pulse 1.6s ease-in-out infinite;
+}
+
+@keyframes ai-border-pulse {
+  0%, 100% {
+    box-shadow: 0 0 0 0 rgba(59, 130, 246, 0.12);
+  }
+  50% {
+    box-shadow: 0 0 0 16px rgba(59, 130, 246, 0.08);
+  }
+}
+
 .compose-header {
   display: flex;
   flex-direction: column;

@@ -157,11 +157,11 @@ test('Authorization scope includes required permissions', () => {
   const url = new URL(auth.url);
   const scope = url.searchParams.get('scope');
 
-  assert(scope.includes('IMAP.AccessAsUser.All'), 'Scope includes IMAP.AccessAsUser.All');
-  assert(scope.includes('SMTP.Send'), 'Scope includes SMTP.Send');
+  assert(scope.includes('Mail.Send'), 'Scope includes Mail.Send');
   assert(scope.includes('offline_access'), 'Scope includes offline_access');
   assert(scope.includes('openid'), 'Scope includes openid');
   assert(scope.includes('profile'), 'Scope includes profile');
+  assert(scope.includes('email'), 'Scope includes email');
 });
 
 test('Each authorization gets unique state', () => {
@@ -263,9 +263,11 @@ test('getRedirectUri returns custom protocol', () => {
 
 test('getScope returns all required scopes', () => {
   const scope = service.getScope();
-  assert(scope.includes('IMAP.AccessAsUser.All'), 'Scope includes IMAP.AccessAsUser.All');
-  assert(scope.includes('SMTP.Send'), 'Scope includes SMTP.Send');
+  assert(scope.includes('Mail.Send'), 'Scope includes Mail.Send');
   assert(scope.includes('offline_access'), 'Scope includes offline_access');
+  assert(scope.includes('openid'), 'Scope includes openid');
+  assert(scope.includes('profile'), 'Scope includes profile');
+  assert(scope.includes('email'), 'Scope includes email');
 });
 
 console.log('\n========================================');

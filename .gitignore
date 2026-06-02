@@ -9,3 +9,6 @@ npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 coverage/
+
+electron-local/
+electron-v42.0.1-win32-x64.zip

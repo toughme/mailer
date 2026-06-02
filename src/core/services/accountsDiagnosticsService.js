@@ -258,14 +258,14 @@ function createAccountsDiagnosticsService({ db, security, proxyService, delivera
         throw new Error('Microsoft OAuth account is not authorized. Click Authorize to complete OAuth setup.');
       }
 
-      if (onProgress) onProgress('Verifying Microsoft OAuth credentials via IMAP...');
-      console.log(`[Account Test] Verifying Microsoft OAuth account ${payload.id} via IMAP XOAUTH2`);
+      if (onProgress) onProgress('Verifying Microsoft OAuth credentials via Microsoft Graph...');
+      console.log(`[Account Test] Verifying Microsoft OAuth account ${payload.id} via Microsoft Graph /me`);
       const verifyResult = await microsoftOauthService.verifyConnection(Number(payload.id));
       if (!verifyResult.ok) {
-        throw new Error('IMAP XOAUTH2 verification failed. The OAuth session may be invalid.');
+        throw new Error('Microsoft Graph verification failed. The OAuth session may be invalid.');
       }
       if (onProgress) onProgress('Microsoft OAuth account verified!');
-      console.log(`[Account Test] Microsoft OAuth IMAP verification successful`);
+      console.log(`[Account Test] Microsoft OAuth Graph verification successful`);
 
           } else if (protocol === 'imap') {
             if (proxyProfileId) {

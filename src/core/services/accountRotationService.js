@@ -47,7 +47,7 @@ function createAccountRotationService({ db, sendSettingsService }) {
          LIMIT 1
        )
        WHERE (accounts.primary_protocol = 'smtp' AND accounts.encrypted_password != '')
-         OR (accounts.primary_protocol = 'graph' AND accounts.oauth_refresh_token != '')
+         OR (accounts.primary_protocol = 'graph' AND (accounts.oauth_refresh_token != '' OR accounts.oauth_access_token != ''))
        ORDER BY accounts.id ASC`
     );
 

@@ -47,88 +47,90 @@ function analyzeSpamContent(input = {}) {
   const html = String(input.contentHtml || input.editorHtml || '');
   const plain = stripHtml(html);
   const combined = `${subject} ${previewText} ${plain}`.toLowerCase();
+  const words = plain.split(/\s+/).filter(Boolean);
 
   let score = 100;
   const signals = [];
   const checklist = [];
 
   function addSignal(id, label, impact, ok, hint) {
-    signals.push({ id, label, impact: Math.round(impact), ok });
+    const roundedImpact = Math.round(impact);
+    signals.push({ id, label, impact: roundedImpact, ok });
     checklist.push({ id, label, ok, hint: hint || label });
     if (!ok) {
-      score -= impact;
+      score -= roundedImpact;
     }
   }
 
   const subjectLen = subject.length;
   addSignal(
-    'subject_len',
+    'subject_present',
+    'Subject present',
+    subject ? 0 : 18,
+    Boolean(subject),
+    subject ? 'Subject included' : 'Add a subject line'
+  );
+
+  addSignal(
+    'subject_length',
     'Subject length',
-    subjectLen >= 24 && subjectLen <= 60 ? 0 : 12,
-    subjectLen >= 24 && subjectLen <= 60,
-    `${subjectLen || 0} chars · aim 24–60`
+    subjectLen && subjectLen < 12 ? 10 : subjectLen > 70 ? 10 : 0,
+    subjectLen >= 12 && subjectLen <= 70,
+    `${subjectLen || 0} chars · aim 12–70`
   );
 
   const capsRatio = subject.replace(/[^A-Z]/g, '').length / Math.max(subject.length, 1);
   addSignal(
     'subject_caps',
-    'Subject caps',
-    capsRatio > 0.35 ? 14 : 0,
-    capsRatio <= 0.35,
-    capsRatio > 0.35 ? 'Reduce ALL CAPS' : 'OK'
+    'Subject capitalization',
+    capsRatio > 0.4 ? 10 : 0,
+    capsRatio <= 0.4,
+    capsRatio > 0.4 ? 'Reduce ALL CAPS' : 'Good'
   );
 
-  const exclamations = (subject.match(/!/g) || []).length + (plain.match(/!/g) || []).length;
+  const subjectExclamations = (subject.match(/!/g) || []).length;
   addSignal(
-    'punctuation',
-    'Exclamation use',
-    exclamations > 2 ? 10 : 0,
-    exclamations <= 2,
-    `${exclamations} found`
+    'subject_exclamation',
+    'Subject punctuation',
+    subjectExclamations > 1 ? 8 : 0,
+    subjectExclamations <= 1,
+    `${subjectExclamations} exclamation${subjectExclamations === 1 ? '' : 's'}`
   );
 
   addSignal(
-    'preview',
+    'preview_text',
     'Preview text',
-    previewText.length >= 35 && previewText.length <= 140 ? 0 : 10,
-    previewText.length >= 35 && previewText.length <= 140,
-    `${previewText.length || 0} chars`
+    previewText ? (previewText.length < 20 || previewText.length > 120 ? 8 : 0) : 5,
+    previewText.length >= 20 && previewText.length <= 120,
+    previewText ? `${previewText.length} chars` : 'No preview text'
+  );
+
+  const textLen = plain.length;
+  addSignal(
+    'body_length',
+    'Body length',
+    textLen < 60 ? 14 : textLen < 120 ? 8 : 0,
+    textLen >= 120,
+    `${textLen} chars`
   );
 
   const linkCount = (html.match(/<a\b/gi) || []).length;
-  const linkDensity = linkCount / Math.max(plain.split(/\s+/).length, 1);
+  const linkDensity = linkCount / Math.max(words.length, 1);
   addSignal(
-    'links',
+    'link_density',
     'Link density',
-    linkCount > 8 || linkDensity > 0.08 ? 12 : 0,
-    linkCount <= 8 && linkDensity <= 0.08,
+    linkCount > 10 || linkDensity > 0.12 ? 10 : 0,
+    linkCount <= 10 && linkDensity <= 0.12,
     `${linkCount} links`
   );
 
   const imgCount = (html.match(/<img\b/gi) || []).length;
-  const textLen = plain.length;
   addSignal(
-    'image_text',
-    'Text vs images',
-    imgCount > 0 && textLen < 120 ? 14 : 0,
-    !(imgCount > 0 && textLen < 120),
+    'image_text_ratio',
+    'Image to text ratio',
+    imgCount > 0 && textLen < 140 ? 12 : 0,
+    !(imgCount > 0 && textLen < 140),
     imgCount ? `${imgCount} images · ${textLen} chars text` : 'Balanced'
-  );
-
-  addSignal(
-    'unsubscribe',
-    'Unsubscribe',
-    /\{\{\s*unsubscribe_url\s*\}\}/i.test(html) || /<a[^>]+unsubscribe/i.test(html) ? 0 : 18,
-    /\{\{\s*unsubscribe_url\s*\}\}/i.test(html) || /<a[^>]+unsubscribe/i.test(html),
-    'Add {{unsubscribe_url}}'
-  );
-
-  addSignal(
-    'cta',
-    'Primary CTA',
-    /<a\b[^>]*href=/i.test(html) ? 0 : 8,
-    /<a\b[^>]*href=/i.test(html),
-    'Include one clear link'
   );
 
   let triggerPenalty = 0;
@@ -139,19 +141,23 @@ function analyzeSpamContent(input = {}) {
       triggersHit.push(trigger.label);
     }
   });
-  triggerPenalty = Math.min(35, triggerPenalty);
+  triggerPenalty = Math.min(30, triggerPenalty);
   addSignal(
-    'triggers',
+    'spam_phrases',
     'Spam phrases',
-    triggerPenalty || 0,
+    triggerPenalty,
     triggerPenalty === 0,
     triggersHit.length ? triggersHit.slice(0, 3).join(', ') : 'None detected'
   );
 
-  if (/<div[^>]+display\s*:\s*none/i.test(html) || /font-size\s*:\s*0/i.test(html)) {
-    score -= 20;
-    signals.push({ id: 'hidden', label: 'Hidden content', impact: 20, ok: false });
-    checklist.push({ id: 'hidden', label: 'Hidden content', ok: false, hint: 'Remove hidden CSS tricks' });
+  const hiddenContent = /<div[^>]+style=["'][^"']*(display\s*:\s*none|font-size\s*:\s*0)[^"']*["']/i.test(html)
+    || /font-size\s*:\s*0/i.test(html);
+  if (hiddenContent) {
+    addSignal('hidden_content', 'Hidden content', 18, false, 'Remove hidden CSS tricks');
+  }
+
+  if (/<a\b[^>]+href=["']?javascript:/i.test(html)) {
+    addSignal('javascript_link', 'Suspicious link', 12, false, 'Avoid javascript: links');
   }
 
   score = clamp(Math.round(score), 0, 100);

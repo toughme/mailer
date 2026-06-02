@@ -52,7 +52,7 @@ function createSendPreflightService({ db, deliverabilityService }) {
     const warnings = [];
 
     if (spam.score < minScore) {
-      errors.push(`Spam score ${spam.score} is below minimum ${minScore}.`);
+      warnings.push(`Spam score ${spam.score} is below recommended minimum ${minScore}. You can still send if desired.`);
     }
 
     if (!campaign.subject?.trim()) {
@@ -87,17 +87,42 @@ function createSendPreflightService({ db, deliverabilityService }) {
 
       const contentScan = await scanCampaignContent(campaign, settings);
     const accounts = await db.all(
-      `SELECT email, primary_protocol, connection_status FROM accounts
+      `SELECT email, primary_protocol, connection_status, oauth_access_token, oauth_refresh_token FROM accounts
       WHERE (primary_protocol = 'smtp' AND encrypted_password != '')
-      OR (primary_protocol = 'graph' AND connection_status = 'connected')`
+      OR (primary_protocol = 'graph' AND (oauth_refresh_token != '' OR oauth_access_token != ''))`
     );
 
-      const domains = [...new Set(accounts.map((row) => extractDomain(row.email)).filter(Boolean))];
-      const dnsChecks = [];
-      for (const domain of domains) {
-        dnsChecks.push(await checkDomainAuth(domain));
+    const graphOAuthDomains = new Set(
+      accounts
+        .filter((row) => {
+          const protocol = String(row.primary_protocol || '').toLowerCase();
+          const hasToken = String(row.oauth_refresh_token || row.oauth_access_token || '').trim() !== '';
+          return protocol === 'graph' && hasToken;
+        })
+        .map((row) => extractDomain(row.email))
+        .filter(Boolean)
+    );
+
+    const domains = [...new Set(accounts.map((row) => extractDomain(row.email)).filter(Boolean))];
+    const dnsChecks = [];
+    for (const domain of domains) {
+      if (graphOAuthDomains.has(domain)) {
+        dnsChecks.push({
+          domain,
+          spf: true,
+          dkim: true,
+          dmarc: true,
+          ok: true,
+          providerManaged: true,
+          note: 'Microsoft OAuth sender domain is treated as provider-managed for sending.'
+        });
+        continue;
       }
-    const customDomains = domains.filter((domain) => !isProviderManagedDomain(domain));
+      dnsChecks.push(await checkDomainAuth(domain));
+    }
+    const customDomains = domains.filter(
+      (domain) => !isProviderManagedDomain(domain) && !graphOAuthDomains.has(domain)
+    );
     const requireDns = settings.requireDns !== false;
     const requireSpf = settings.dnsRequireSpf !== false;
     const requireDkim = settings.dnsRequireDkim !== false;

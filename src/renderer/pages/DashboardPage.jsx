@@ -37,8 +37,8 @@ function DashboardPage() {
         <Tooltip label="Manage SMTP accounts">
           <Link className="primary-button" to="/accounts">Accounts</Link>
         </Tooltip>
-        <Tooltip label="Create campaigns">
-          <Link className="ghost-button" to="/campaigns">Campaigns</Link>
+        <Tooltip label="Create emails">
+          <Link className="ghost-button" to="/campaigns">Emails</Link>
         </Tooltip>
         <Tooltip label="Send with rotation & delays">
           <Link className="primary-button" to="/send">Send</Link>

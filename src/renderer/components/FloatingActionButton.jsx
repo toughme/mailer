@@ -6,8 +6,8 @@ function FloatingActionButton() {
   const navigate = useNavigate();
 
   const menuItems = [
-    { icon: '📧', label: 'New Campaign', action: () => navigate('/campaigns') },
-    { icon: '👥', label: 'New Audience', action: () => navigate('/audience') },
+    { icon: '📧', label: 'New Email', action: () => navigate('/campaigns') },
+    { icon: '👥', label: 'Recipients', action: () => navigate('/audience') },
     { icon: '📝', label: 'New Content', action: () => navigate('/content') },
     { icon: '🔌', label: 'Add Account', action: () => navigate('/accounts') },
   ];

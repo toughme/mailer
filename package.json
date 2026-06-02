@@ -41,7 +41,7 @@
     "@babel/preset-react": "^7.24.3",
     "babel-loader": "^9.1.4",
     "css-loader": "^6.9.4",
-    "electron": "^42.0.1",
+    "electron": "^42.3.0",
     "electron-packager": "^17.1.2",
     "electron-rebuild": "^3.2.9",
     "electron-winstaller": "^5.0.0",
@@ -49,5 +49,8 @@
     "terser-webpack-plugin": "^5.3.9",
     "webpack": "^5.88.2",
     "webpack-cli": "^5.1.4"
+  },
+  "overrides": {
+    "tar": "^7.5.11"
   }
 }

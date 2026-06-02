@@ -19,6 +19,50 @@ const initialForm = {
   scheduledAt: ''
 };
 
+function formatFileSize(size) {
+  const bytes = Number(size) || 0;
+  if (bytes >= 1024 * 1024) {
+    return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+  }
+  if (bytes >= 1024) {
+    return `${Math.round(bytes / 1024)} KB`;
+  }
+  return `${bytes} B`;
+}
+
+function escapeHtml(value) {
+  return String(value || '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
+function normalizeUrl(value) {
+  const url = String(value || '').trim();
+  if (!url) {
+    return '';
+  }
+  if (/^(https?:|mailto:|tel:|file:)/i.test(url)) {
+    return url;
+  }
+  return `https://${url}`;
+}
+
+function buildAttachmentHtml(attachment) {
+  const url = normalizeUrl(attachment.url || '');
+  const metadata = encodeURIComponent(JSON.stringify({ ...attachment, url }));
+  const label = escapeHtml(attachment.filename || 'Attachment');
+  const size = formatFileSize(attachment.size);
+  const href = url || '#';
+  const anchorAttrs = url
+    ? `href="${escapeHtml(href)}" target="_blank" rel="noreferrer noopener" data-pm-attachment="${metadata}"`
+    : `href="#" data-pm-attachment="${metadata}"`;
+
+  return `<p style="border:1px solid #d9e2ef;background:#f8fbff;border-radius:8px;padding:10px 12px;margin:12px 0;color:#24324b;font-size:13px;"><strong>Attachment</strong><br /><a ${anchorAttrs} style="color:#0066cc;text-decoration:underline;">${label}</a><span style="color:#667085;"> (${size})</span></p>`;
+}
+
 function CampaignsPage() {
   const [campaigns, setCampaigns] = useState([]);
   const [campaignStatusMap, setCampaignStatusMap] = useState({});
@@ -32,6 +76,7 @@ function CampaignsPage() {
   const [showRecipientPicker, setShowRecipientPicker] = useState(false);
   const [recipientSearch, setRecipientSearch] = useState('');
   const [editingCampaignId, setEditingCampaignId] = useState(null);
+  const [pendingConfirmation, setPendingConfirmation] = useState(null);
   const formPanelRef = useRef(null);
   const { process, startProcess, updateProcess, completeProcess, cancelProcess } = useProcess();
 
@@ -120,6 +165,30 @@ function CampaignsPage() {
     setError('');
   }
 
+  async function handleAttachmentInsert(field) {
+    try {
+      const attachments = await desktopInvoke('content:pick-attachment');
+      if (!Array.isArray(attachments) || !attachments.length) {
+        return;
+      }
+
+      const html = attachments.map((attachment) => {
+        const url = normalizeUrl(window.prompt(`Enter a URL to open when ${attachment.filename || 'this file'} is clicked`, attachment.url || 'https://') || '');
+        return buildAttachmentHtml({
+          ...attachment,
+          url
+        });
+      }).join('');
+
+      setForm((current) => ({
+        ...current,
+        [field]: `${current[field] || ''}${html}`
+      }));
+    } catch (attachmentError) {
+      setError(attachmentError.message || 'Unable to add attachment.');
+    }
+  }
+
   async function handleSubmit(event) {
     event.preventDefault();
     try {
@@ -200,11 +269,11 @@ function CampaignsPage() {
   async function scanAllCampaigns() {
     const candidates = campaigns.filter((campaign) => ['draft', 'scheduled', 'paused'].includes(campaign.status));
     if (!candidates.length) {
-      setError('No draft, scheduled, or paused campaigns are available to scan.');
+      setError('No draft, scheduled, or paused emails are available to scan.');
       return;
     }
 
-    startProcess('Scanning Campaigns', {
+    startProcess('Scanning Emails', {
       message: `Scanning 1 of ${candidates.length}`,
       progress: 0,
       total: candidates.length
@@ -232,7 +301,7 @@ function CampaignsPage() {
     setError(blocked ? `${blocked} campaign(s) need fixes before sending.` : '');
   }
 
-  async function moveTo(status, id) {
+  async function moveTo(status, id, confirmOverride = false) {
     try {
       if (status === 'active') {
         const preflight = await desktopInvoke('sends:preflight', { campaignId: id });
@@ -241,8 +310,21 @@ function CampaignsPage() {
           setScanMap((current) => ({ ...current, [id]: preflight }));
           return;
         }
+
+        // If there are warnings (like low trust score) and user hasn't confirmed override, ask for confirmation
+        if (preflight.warnings && preflight.warnings.length > 0 && !confirmOverride) {
+          setPendingConfirmation({
+            campaignId: id,
+            warnings: preflight.warnings,
+            preflight
+          });
+          setScanMap((current) => ({ ...current, [id]: preflight }));
+          return;
+        }
+
         await desktopInvoke('sends:start-campaign', { campaignId: id });
         await refresh();
+        setPendingConfirmation(null);
         setError('');
         return;
       }
@@ -400,25 +482,33 @@ function CampaignsPage() {
               Preview
               <input value={form.previewText} onChange={(event) => setForm({ ...form, previewText: event.target.value })} />
             </label>
-            <label className="full-span">
-              Body
-              <textarea rows="8" value={form.content} onChange={(event) => setForm({ ...form, content: event.target.value })} />
-            </label>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '12px' }}>
+              <label className="full-span" style={{ margin: 0 }}>
+                Body
+                <textarea rows="8" value={form.content} onChange={(event) => setForm({ ...form, content: event.target.value })} />
+              </label>
+              <button className="secondary-button sm" type="button" onClick={() => handleAttachmentInsert('content')}>Add attachment</button>
+            </div>
           </div>
           {form.abEnabled ? (
             <div className="section-grid">
-              <label>
-                Subject B
-                <input value={form.subjectB} onChange={(event) => setForm({ ...form, subjectB: event.target.value })} />
-              </label>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '12px' }}>
+                <label style={{ flex: 1, margin: 0 }}>
+                  Subject B
+                  <input value={form.subjectB} onChange={(event) => setForm({ ...form, subjectB: event.target.value })} />
+                </label>
+              </div>
               <label>
                 Split %
                 <input type="number" min="10" max="90" value={form.splitRatio} onChange={(event) => setForm({ ...form, splitRatio: Number(event.target.value) })} />
               </label>
-              <label className="full-span">
-                Body B
-                <textarea rows="6" value={form.contentB} onChange={(event) => setForm({ ...form, contentB: event.target.value })} />
-              </label>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '12px' }}>
+                <label className="full-span" style={{ margin: 0 }}>
+                  Body B
+                  <textarea rows="6" value={form.contentB} onChange={(event) => setForm({ ...form, contentB: event.target.value })} />
+                </label>
+                <button className="secondary-button sm" type="button" onClick={() => handleAttachmentInsert('contentB')}>Add attachment</button>
+              </div>
             </div>
           ) : null}
           <div className="section-grid">
@@ -495,7 +585,7 @@ function CampaignsPage() {
             </div>
           )}
           <div className="button-row">
-            <Tooltip label="Save campaign">
+            <Tooltip label="Save email">
               <button className="primary-button" type="submit">{editingCampaignId ? 'Update' : 'Save'}</button>
             </Tooltip>
             {editingCampaignId && (
@@ -512,10 +602,10 @@ function CampaignsPage() {
       <div className="panel campaign-summary-panel">
         <div className="panel-toolbar account-summary-toolbar">
           <div>
-            <strong>Campaigns</strong>
-            <p className="muted-copy">Preflight status and send controls.</p>
+            <strong>Emails</strong>
+            <p className="muted-copy">Pre-send status and delivery controls.</p>
           </div>
-          <Tooltip label="Scan every draft, scheduled, and paused campaign">
+          <Tooltip label="Scan every draft, scheduled, and paused email">
             <button className="primary-button sm" type="button" onClick={scanAllCampaigns}>Scan All</button>
           </Tooltip>
         </div>
@@ -591,6 +681,69 @@ function CampaignsPage() {
         total={process.total}
         onCancel={cancelProcess}
       />
+    )}
+    {pendingConfirmation && (
+      <div style={{
+        position: 'fixed',
+        inset: 0,
+        background: 'rgba(0, 0, 0, 0.5)',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        zIndex: 1000
+      }}>
+        <div style={{
+          background: 'var(--panel)',
+          borderRadius: 'var(--border-radius-lg)',
+          padding: '32px',
+          maxWidth: '520px',
+          boxShadow: 'var(--shadow-xl)'
+        }}>
+          <h2 style={{ margin: '0 0 16px', color: 'var(--text)' }}>
+            Email Warnings
+          </h2>
+          <p style={{ color: 'var(--text-secondary)', marginBottom: '16px' }}>
+            This email has some warnings but can still be sent. Would you like to proceed?
+          </p>
+          <div style={{
+            background: 'var(--panel-alt)',
+            border: '1px solid var(--panel-border)',
+            borderRadius: 'var(--border-radius-md)',
+            padding: '12px',
+            marginBottom: '24px',
+            maxHeight: '200px',
+            overflowY: 'auto'
+          }}>
+            {pendingConfirmation.warnings.map((warning, index) => (
+              <div key={index} style={{ 
+                padding: '8px 0', 
+                borderBottom: index < pendingConfirmation.warnings.length - 1 ? '1px solid var(--panel-border)' : 'none',
+                color: 'var(--warn)'
+              }}>
+                • {warning}
+              </div>
+            ))}
+          </div>
+          <div style={{ display: 'flex', gap: '12px', justifyContent: 'flex-end' }}>
+            <button
+              className="ghost-button"
+              type="button"
+              onClick={() => setPendingConfirmation(null)}
+              style={{ padding: '10px 20px' }}
+            >
+              Cancel
+            </button>
+            <button
+              className="primary-button"
+              type="button"
+              onClick={() => moveTo('active', pendingConfirmation.campaignId, true)}
+              style={{ padding: '10px 20px' }}
+            >
+              Send Anyway
+            </button>
+          </div>
+        </div>
+      </div>
     )}
     </>
   );

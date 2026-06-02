@@ -37,7 +37,7 @@ const starterBlocks = [
   {
     id: makeId(),
     type: 'heading',
-    content: 'Write a clear campaign headline',
+    content: 'Write a clear email headline',
     styles: baseStyles({ fontSize: 32, lineHeight: 1.2, fontWeight: 700, textColor: '#111827', paddingTop: 24, paddingBottom: 12, align: 'center' })
   },
   {
@@ -81,7 +81,7 @@ const builtinTemplates = [
     previewText: 'A faster way to get more done',
     blocks: [
       makeBlock('logo'),
-      makeBlock('heading', 'A simpler way to launch your next campaign'),
+      makeBlock('heading', 'A simpler way to launch your next email'),
       makeBlock('text', 'Hi {{first_name}}, we built a cleaner workflow for teams that need polished outreach without wrestling with old email builders.'),
       makeBlock('image'),
       makeBlock('button', 'Explore the update'),
@@ -665,6 +665,25 @@ function ContentPage() {
     }
   }
 
+  async function processAiRewrite(payload) {
+    setAiBusy(true);
+    setError('');
+    try {
+      return await desktopInvoke('ai:process-email', {
+        mode: payload.mode || 'rewrite',
+        html: payload.html || bodyHtml,
+        selectedText: payload.selectedText || '',
+        subject,
+        previewText
+      });
+    } catch (aiError) {
+      setError(aiError.message);
+      throw aiError;
+    } finally {
+      setAiBusy(false);
+    }
+  }
+
   async function saveDocument() {
     if (!subject.trim()) {
       setError('Subject is required before saving.');
@@ -683,9 +702,10 @@ function ContentPage() {
         mode: contentMode,
         recipients
       };
+      const saveName = subject.trim() || name || 'Untitled content';
       const rows = await desktopInvoke('content:save-document', {
         id: selectedDocumentId ? Number(selectedDocumentId) : null,
-        name,
+        name: saveName,
         subject,
         previewText,
         editorHtml: serializeBuilder(nextEditorState),
@@ -695,9 +715,11 @@ function ContentPage() {
         throw new Error('Unexpected response from save endpoint.');
       }
       setDocuments(rows);
-      const saved = rows.find((row) => row.name === name) || rows[0];
+      const saved = selectedDocumentId
+        ? rows.find((row) => Number(row.id) === Number(selectedDocumentId))
+        : rows.find((row) => row.name === saveName) || rows[0];
       if (saved) loadDocument(saved);
-      setSavedMessage('Saved. This content is now available inside Campaigns.');
+      setSavedMessage('Saved. This content is now available inside Emails.');
       setError('');
       setTimeout(() => setSavedMessage(''), 3000);
     } catch (saveError) {
@@ -980,7 +1002,7 @@ function ContentPage() {
             </div>
           </div>
   ) : contentMode === 'compose' ? (
-  <div className="compose-stage">
+  <div className={`compose-stage ${aiBusy ? 'ai-busy' : ''}`}>
     <div className="compose-header">
       <div className="compose-header-row">
         <div className="compose-header-fields">
@@ -1019,13 +1041,7 @@ function ContentPage() {
                   const result = await desktopInvoke('content:pick-attachment');
                   return Array.isArray(result) ? result : [];
                 }}
-                onAiRewrite={async (payload) => desktopInvoke('ai:process-email', {
-                  mode: payload.mode || 'rewrite',
-                  html: payload.html || bodyHtml,
-                  selectedText: payload.selectedText || '',
-                  subject,
-                  previewText
-                })}
+                onAiRewrite={processAiRewrite}
                 defaultSignature="<p>Best,<br>{{first_name}}</p>"
                 onSwitchMode={() => setShowHtmlView(true)}
                 onToggleTemplates={() => setShowTemplates((current) => !current)}
@@ -1130,7 +1146,7 @@ function ContentPage() {
                 ))}
               </div>
             ) : null}
-            <div className="email-stage" style={{ background: canvas.backgroundColor }}>
+            <div className={`email-stage ${aiBusy ? 'ai-busy' : ''}`} style={{ background: canvas.backgroundColor }}>
               <div
                 className={`email-canvas ${device}`}
                 style={{ width: device === 'desktop' ? canvas.width : 375, background: canvas.contentBackgroundColor, borderRadius: canvas.borderRadius }}

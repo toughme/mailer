@@ -2,18 +2,56 @@ const { app, BrowserWindow, Menu, ipcMain, shell, screen, session } = require('e
 const fs = require('fs');
 const path = require('path');
 const os = require('os');
-const { pathToFileURL } = require('url');
 
 const { initializeRuntime, registerIpcHandlers } = require('./core/appRuntime');
 
 const isDevelopment = process.env.NODE_ENV !== 'production';
+const devUserDataPath = path.resolve(os.tmpdir(), 'phantom-mailer-dev', 'desktop');
+const devCachePath = path.join(devUserDataPath, 'Cache');
 let mainWindow = null;
 let runtime = null;
 
+global._pendingProtocolUrls = global._pendingProtocolUrls || [];
+
+const protocolPrefix = 'com.emclient.MailClient://';
+const extractProtocolUrl = (arg) => {
+  if (!arg) {
+    return null;
+  }
+
+  const value = String(arg).trim();
+  const lowerValue = value.toLowerCase();
+  const lowerPrefix = protocolPrefix.toLowerCase();
+  const index = lowerValue.indexOf(lowerPrefix);
+  if (index === -1) {
+    return null;
+  }
+
+  return value.substring(index);
+};
+
+global.processProtocolUrl = (url) => {
+  const extractedUrl = extractProtocolUrl(url);
+  if (!extractedUrl) {
+    console.log('[Main] Received non-protocol or malformed URL; ignoring:', url);
+    return;
+  }
+
+  if (global.oauthCallbackHandler) {
+    console.log('[Main] Processing protocol callback directly with handler ready:', extractedUrl);
+    global.oauthCallbackHandler(extractedUrl);
+  } else {
+    global._pendingProtocolUrls = global._pendingProtocolUrls || [];
+    console.log('[Main] Queuing protocol URL until handler is ready:', extractedUrl);
+    global._pendingProtocolUrls.push(extractedUrl);
+    console.log('[Main] Pending protocol queue length:', global._pendingProtocolUrls.length);
+  }
+};
+
 if (!app.isPackaged && isDevelopment) {
-const devUserDataPath = path.resolve(__dirname, '..', 'data', 'desktop');
-fs.mkdirSync(devUserDataPath, { recursive: true });
-app.setPath('userData', devUserDataPath);
+  fs.mkdirSync(devCachePath, { recursive: true });
+  app.setPath('userData', devUserDataPath);
+  app.commandLine.appendSwitch('disk-cache-dir', devCachePath);
 }
 
 app.commandLine.appendSwitch('disable-gpu');
@@ -21,7 +59,14 @@ app.commandLine.appendSwitch('disable-gpu-compositing');
 app.commandLine.appendSwitch('disable-software-rasterizer');
 app.commandLine.appendSwitch('disable-gpu-sandbox');
 app.commandLine.appendSwitch('disable-accelerated-2d-canvas');
-app.commandLine.appendSwitch('disk-cache-dir', path.join(os.tmpdir(), 'phantom-electron-cache'));
+app.commandLine.appendSwitch('disable-application-cache');
+app.commandLine.appendSwitch('disable-cache');
+app.commandLine.appendSwitch('disable-threaded-animation');
+app.commandLine.appendSwitch('disable-threaded-scrolling');
+app.commandLine.appendSwitch('ignore-gpu-blacklist');
+app.commandLine.appendSwitch('disable-gpu-driver-bug-workarounds');
+app.commandLine.appendSwitch('disable-features', 'VizDisplayCompositor');
+app.commandLine.appendSwitch('use-gl', 'swiftshader');
 app.disableHardwareAcceleration();
 
 const gotSingleInstanceLock = app.requestSingleInstanceLock();
@@ -30,6 +75,8 @@ if (!gotSingleInstanceLock) {
   app.quit();
 }
 
+// Queue protocol URLs that may arrive before an OAuth handler is registered
+global._pendingProtocolUrls = global._pendingProtocolUrls || [];
 try {
   if (app.isPackaged) {
     app.setAsDefaultProtocolClient('com.emclient.MailClient');
@@ -74,23 +121,6 @@ function saveWindowState(window) {
 }
 
 function createWindow() {
-  session.defaultSession.webRequest.onHeadersReceived((details, callback) => {
-    callback({
-      responseHeaders: {
-        ...details.responseHeaders,
-        'Content-Security-Policy': [
-          "default-src 'self' 'unsafe-inline' data: blob:; " +
-          "script-src 'self' 'unsafe-inline' 'unsafe-eval'; " +
-          "connect-src 'self' https:; " +
-          "img-src 'self' data: blob: https:; " +
-          "style-src 'self' 'unsafe-inline'; " +
-          "font-src 'self' data:; " +
-          "object-src 'none'; " +
-          "base-uri 'self';"
-        ]
-      }
-    });
-  });
 
   const primaryDisplay = screen.getPrimaryDisplay();
   const { width: screenWidth, height: screenHeight } = primaryDisplay.workAreaSize;
@@ -127,9 +157,15 @@ function createWindow() {
 
   Menu.setApplicationMenu(null);
   const rendererIndexPath = path.resolve(__dirname, 'renderer', 'index.html');
-  const rendererIndexUrl = pathToFileURL(rendererIndexPath).toString();
-  mainWindow.loadURL(rendererIndexUrl).catch((error) => {
-    console.error('Failed to load renderer:', error, rendererIndexUrl);
+  console.log('[Main] Renderer index path:', rendererIndexPath, 'exists:', fs.existsSync(rendererIndexPath));
+  try {
+    const html = fs.readFileSync(rendererIndexPath, 'utf8');
+    console.log('[Main] Read index.html length:', html.length);
+  } catch (readError) {
+    console.error('[Main] Failed to read index.html:', readError);
+  }
+  mainWindow.loadFile(rendererIndexPath).catch((error) => {
+    console.error('Failed to load renderer file:', error, rendererIndexPath);
   });
 
   mainWindow.once('ready-to-show', () => {
@@ -174,7 +210,11 @@ function createWindow() {
 }
 
 app.on('second-instance', (event, argv) => {
+  console.log('[Main] second-instance event received:', { argvLength: argv.length });
+  argv.forEach((arg, index) => console.log(`[Main] second-instance argv[${index}]=`, arg));
+
   if (!mainWindow) {
+    console.log('[Main] second-instance received but mainWindow is not available yet');
     return;
   }
 
@@ -184,20 +224,21 @@ app.on('second-instance', (event, argv) => {
 
   mainWindow.focus();
 
-  // Handle protocol redirect on Windows: check if argv contains our custom protocol
-  const protocolUrl = argv.find((arg) => arg.startsWith('com.emclient.MailClient://'));
-  if (protocolUrl && global.oauthCallbackHandler) {
-    global.oauthCallbackHandler(protocolUrl);
+  const protocolUrl = argv.map(extractProtocolUrl).find(Boolean);
+  if (protocolUrl) {
+    console.log('[Main] second-instance protocol URL detected:', protocolUrl);
+    global.processProtocolUrl(protocolUrl);
+  } else {
+    console.log('[Main] second-instance no protocol URL found');
   }
 });
 
 // Handle protocol redirect on macOS
 if (process.platform === 'darwin') {
   app.on('open-url', (event, url) => {
+    console.log('[Main] macOS open-url event received:', url);
     event.preventDefault();
-    if (url && url.startsWith('com.emclient.MailClient://') && global.oauthCallbackHandler) {
-      global.oauthCallbackHandler(url);
-    }
+    global.processProtocolUrl(url);
   });
 }
 
@@ -206,10 +247,15 @@ app.whenReady().then(async () => {
   createWindow();
   registerIpcHandlers(ipcMain, runtime, app, mainWindow);
 
-  app.on('activate', () => {
-    if (BrowserWindow.getAllWindows().length === 0) {
-      createWindow();
-    }
+  // Process protocol callback URLs passed when this instance started.
+  console.log('[Main] Startup argv count:', process.argv.length);
+  process.argv.forEach((arg, index) => console.log(`[Main] startup argv[${index}]=`, arg));
+
+  const protocolArgs = process.argv.map(extractProtocolUrl).filter(Boolean);
+  console.log('[Main] Startup protocol arguments count:', protocolArgs.length);
+  protocolArgs.forEach((arg) => {
+    console.log('[Main] Startup protocol argument:', arg);
+    global.processProtocolUrl(arg);
   });
 }).catch((error) => {
   console.error('Application failed to start:', error);

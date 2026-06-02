@@ -42,8 +42,8 @@ function App() {
           <NavLink to="/" end>Dashboard</NavLink>
           <NavLink to="/send">Send</NavLink>
           <NavLink to="/accounts">Accounts</NavLink>
-          <NavLink to="/campaigns">Campaigns</NavLink>
-          <NavLink to="/audience">Audience</NavLink>
+          <NavLink to="/campaigns">Emails</NavLink>
+          <NavLink to="/audience">Recipients</NavLink>
           <NavLink to="/content">Content</NavLink>
           <NavLink to="/deliverability">Deliverability</NavLink>
           <NavLink to="/infrastructure">Infrastructure</NavLink>

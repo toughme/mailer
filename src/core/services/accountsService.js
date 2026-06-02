@@ -136,7 +136,9 @@ function createAccountsService({ db, security }) {
       const rows = await db.all('SELECT * FROM accounts ORDER BY created_at DESC');
       return rows.map((row) => {
         const connectionStatus = row.connection_status || 'pending';
-        const hasOAuth = connectionStatus === 'connected' && Boolean(row.oauth_refresh_token);
+        const hasOAuth = Boolean(row.oauth_refresh_token || row.oauth_access_token);
+        const oauthExpiresAt = row.oauth_expires_at ? new Date(row.oauth_expires_at).getTime() : null;
+        const tokenExpired = oauthExpiresAt ? oauthExpiresAt < Date.now() : false;
         return {
           id: row.id,
           provider: row.provider,
@@ -153,6 +155,7 @@ function createAccountsService({ db, security }) {
           hasOAuth,
           connectionStatus,
           oauthExpiresAt: row.oauth_expires_at || null,
+          tokenExpired,
           createdAt: row.created_at,
           updatedAt: row.updated_at
         };
@@ -225,7 +228,9 @@ function createAccountsService({ db, security }) {
       }
 
       const connectionStatus = row.connection_status || 'pending';
-      const hasOAuth = connectionStatus === 'connected' && Boolean(row.oauth_refresh_token);
+      const hasOAuth = Boolean(row.oauth_refresh_token || row.oauth_access_token);
+      const oauthExpiresAt = row.oauth_expires_at ? new Date(row.oauth_expires_at).getTime() : null;
+      const tokenExpired = oauthExpiresAt ? oauthExpiresAt < Date.now() : false;
       return {
         id: row.id,
         provider: row.provider,
@@ -242,6 +247,7 @@ function createAccountsService({ db, security }) {
         hasOAuth,
         connectionStatus,
         oauthExpiresAt: row.oauth_expires_at || null,
+        tokenExpired,
         createdAt: row.created_at,
         updatedAt: row.updated_at
       };
