@@ -380,31 +380,36 @@ function createSendQueueService({
               break;
             }
 
-            const settings = await sendSettingsService.get();
-            const account = await accountRotationService.pickNextAccount(settings);
+        const settings = await sendSettingsService.get();
+        const account = await accountRotationService.pickNextAccount(settings);
 
-            if (!account) {
-              await sleep(15000);
-              continue;
+        if (!account) {
+          await sleep(15000);
+          continue;
+        }
+
+        const campaign = await db.get('SELECT * FROM campaigns WHERE id = ?', [job.campaign_id]);
+
+        await db.run(
+          `UPDATE send_queue SET status = 'sending', account_id = ?, attempts = attempts + 1 WHERE id = ?`,
+          [account.id, job.id]
+        );
+
+        try {
+          await emailSendService.sendMessage({
+            accountId: account.id,
+            recipient: {
+              email: job.recipient_email,
+              name: job.recipient_name
+            },
+            subject: job.subject,
+            html: job.content_html,
+            previewText: job.preview_text,
+            settings: {
+              ...settings,
+              replyTo: campaign?.reply_to || settings.replyTo || ''
             }
-
-            await db.run(
-              `UPDATE send_queue SET status = 'sending', account_id = ?, attempts = attempts + 1 WHERE id = ?`,
-              [account.id, job.id]
-            );
-
-            try {
-              await emailSendService.sendMessage({
-                accountId: account.id,
-                recipient: {
-                  email: job.recipient_email,
-                  name: job.recipient_name
-                },
-                subject: job.subject,
-                html: job.content_html,
-                previewText: job.preview_text,
-                settings
-              });
+          });
 
               await db.run(
                 `UPDATE send_queue SET status = 'sent', sent_at = CURRENT_TIMESTAMP, last_error = '' WHERE id = ?`,

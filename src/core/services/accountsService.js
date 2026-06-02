@@ -150,67 +150,70 @@ function createAccountsService({ db, security }) {
           port: row.port,
           secure: Boolean(row.secure),
           proxyProfileId: row.proxy_profile_id || null,
-          notes: row.notes,
-          hasPassword: Boolean(row.encrypted_password) && row.encrypted_password !== '',
-          hasOAuth,
-          connectionStatus,
-          oauthExpiresAt: row.oauth_expires_at || null,
-          tokenExpired,
-          createdAt: row.created_at,
-          updatedAt: row.updated_at
-        };
-      });
-    },
+      notes: row.notes,
+      replyTo: row.reply_to || '',
+      hasPassword: Boolean(row.encrypted_password) && row.encrypted_password !== '',
+      hasOAuth,
+      connectionStatus,
+      oauthExpiresAt: row.oauth_expires_at || null,
+      tokenExpired,
+      createdAt: row.created_at,
+      updatedAt: row.updated_at
+    };
+  });
+},
 
-    async create(payload) {
-      const provider = String(payload.provider || '').trim();
-      const primaryProtocol = String(payload.primaryProtocol || 'smtp').trim().toLowerCase();
-      const email = String(payload.email || '').trim().toLowerCase();
-      const displayName = String(payload.displayName || '').trim();
-      const username = String(payload.username || email).trim();
-      const password = String(payload.password || '').trim();
-      const host = String(payload.host || '').trim();
-      const port = Number(payload.port) || (primaryProtocol === 'graph' ? 0 : 587);
-      const secure = payload.secure === false ? 0 : 1;
-      const proxyProfileId = payload.proxyProfileId ? Number(payload.proxyProfileId) : null;
-      const notes = String(payload.notes || '').trim();
+async create(payload) {
+  const provider = String(payload.provider || '').trim();
+  const primaryProtocol = String(payload.primaryProtocol || 'smtp').trim().toLowerCase();
+  const email = String(payload.email || '').trim().toLowerCase();
+  const displayName = String(payload.displayName || '').trim();
+  const username = String(payload.username || email).trim();
+  const password = String(payload.password || '').trim();
+  const host = String(payload.host || '').trim();
+  const port = Number(payload.port) || (primaryProtocol === 'graph' ? 0 : 587);
+  const secure = payload.secure === false ? 0 : 1;
+  const proxyProfileId = payload.proxyProfileId ? Number(payload.proxyProfileId) : null;
+  const notes = String(payload.notes || '').trim();
+  const replyTo = String(payload.replyTo || '').trim();
 
-      if (!provider || !email || (primaryProtocol !== 'graph' && !host)) {
-        throw new Error('Provider, email, and host are required for non-Graph accounts.');
-      }
+  if (!provider || !email || (primaryProtocol !== 'graph' && !host)) {
+    throw new Error('Provider, email, and host are required for non-Graph accounts.');
+  }
 
-      if (!['smtp', 'imap', 'pop3', 'graph'].includes(primaryProtocol)) {
-        throw new Error('Primary protocol must be smtp, imap, pop3, or graph.');
-      }
+  if (!['smtp', 'imap', 'pop3', 'graph'].includes(primaryProtocol)) {
+    throw new Error('Primary protocol must be smtp, imap, pop3, or graph.');
+  }
 
-      const connectionStatus = primaryProtocol === 'graph' ? 'pending' : 'connected';
+  const connectionStatus = primaryProtocol === 'graph' ? 'pending' : 'connected';
 
-      try {
-        await db.run(
-          `INSERT INTO accounts
-          (provider, primary_protocol, email, display_name, username, encrypted_password, host, port, secure, proxy_profile_id, notes, connection_status, updated_at)
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)`,
-          [
-            provider,
-            primaryProtocol,
-            email,
-            displayName,
-            username,
-            primaryProtocol === 'graph' ? '' : security.encrypt(password),
-            host,
-            port,
-            secure,
-            proxyProfileId,
-            notes,
-            connectionStatus
-          ]
-        );
-      } catch (error) {
-        if (error.message && error.message.includes('UNIQUE constraint failed: accounts.email')) {
-          throw new Error('An account with this email already exists.');
-        }
-        throw error;
-      }
+  try {
+    await db.run(
+      `INSERT INTO accounts
+      (provider, primary_protocol, email, display_name, username, encrypted_password, host, port, secure, proxy_profile_id, notes, reply_to, connection_status, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)`,
+      [
+        provider,
+        primaryProtocol,
+        email,
+        displayName,
+        username,
+        primaryProtocol === 'graph' ? '' : security.encrypt(password),
+        host,
+        port,
+        secure,
+        proxyProfileId,
+        notes,
+        replyTo,
+        connectionStatus
+      ]
+    );
+  } catch (error) {
+    if (error.message && error.message.includes('UNIQUE constraint failed: accounts.email')) {
+      throw new Error('An account with this email already exists.');
+    }
+    throw error;
+  }
 
       await persistDnsAuth(db, email);
       return this.list();
@@ -242,18 +245,19 @@ function createAccountsService({ db, security }) {
         port: row.port,
         secure: Boolean(row.secure),
         proxyProfileId: row.proxy_profile_id || null,
-        notes: row.notes,
-        hasPassword: Boolean(row.encrypted_password) && row.encrypted_password !== '',
-        hasOAuth,
-        connectionStatus,
-        oauthExpiresAt: row.oauth_expires_at || null,
-        tokenExpired,
-        createdAt: row.created_at,
-        updatedAt: row.updated_at
-      };
-    },
+    notes: row.notes,
+    replyTo: row.reply_to || '',
+    hasPassword: Boolean(row.encrypted_password) && row.encrypted_password !== '',
+    hasOAuth,
+    connectionStatus,
+    oauthExpiresAt: row.oauth_expires_at || null,
+    tokenExpired,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at
+  };
+},
 
-    async getForDiagnostics() {
+async getForDiagnostics() {
       const rows = await db.all('SELECT * FROM accounts');
       return rows.map((row) => ({
         provider: row.provider,

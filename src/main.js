@@ -1,4 +1,4 @@
-const { app, BrowserWindow, Menu, ipcMain, shell, screen, session } = require('electron');
+const { app, BrowserWindow, Menu, ipcMain, shell, screen, session, protocol } = require('electron');
 const fs = require('fs');
 const path = require('path');
 const os = require('os');
@@ -74,6 +74,19 @@ const gotSingleInstanceLock = app.requestSingleInstanceLock();
 if (!gotSingleInstanceLock) {
   app.quit();
 }
+
+app.on('ready', () => {
+  try {
+    protocol.registerFileProtocol('app', (request, callback) => {
+      const url = request.url.substring('app://'.length);
+      const decodedPath = decodeURIComponent(url);
+      const filePath = path.join(__dirname, decodedPath);
+      callback(filePath);
+    });
+  } catch (error) {
+    console.warn('[Main] Could not register app:// protocol:', error.message);
+  }
+});
 
 // Queue protocol URLs that may arrive before an OAuth handler is registered
 global._pendingProtocolUrls = global._pendingProtocolUrls || [];
@@ -157,6 +170,7 @@ function createWindow() {
 
   Menu.setApplicationMenu(null);
   const rendererIndexPath = path.resolve(__dirname, 'renderer', 'index.html');
+  const rendererRelativePath = path.relative(__dirname, rendererIndexPath).replace(/\\/g, '/');
   console.log('[Main] Renderer index path:', rendererIndexPath, 'exists:', fs.existsSync(rendererIndexPath));
   try {
     const html = fs.readFileSync(rendererIndexPath, 'utf8');
@@ -164,8 +178,14 @@ function createWindow() {
   } catch (readError) {
     console.error('[Main] Failed to read index.html:', readError);
   }
-  mainWindow.loadFile(rendererIndexPath).catch((error) => {
-    console.error('Failed to load renderer file:', error, rendererIndexPath);
+  const appUrl = `app://${rendererRelativePath}`;
+  console.log('[Main] Renderer index URL:', appUrl);
+  mainWindow.loadURL(appUrl).catch((error) => {
+    console.error('Failed to load renderer via app:// protocol:', error);
+    console.log('[Main] Falling back to loadFile...');
+    mainWindow.loadFile(rendererIndexPath).catch((fallbackError) => {
+      console.error('Failed to load renderer file (fallback):', fallbackError, rendererIndexPath);
+    });
   });
 
   mainWindow.once('ready-to-show', () => {
@@ -182,7 +202,7 @@ function createWindow() {
   });
 
   mainWindow.webContents.on('will-navigate', (event, url) => {
-    if (!url.startsWith('file://')) {
+    if (!url.startsWith('file://') && !url.startsWith('app://')) {
       event.preventDefault();
       shell.openExternal(url).catch(() => {});
     }

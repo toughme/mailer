@@ -320,8 +320,11 @@ async function initializeDatabase(baseDataDir) {
   await addColumnIfMissing(manager, 'campaigns', 'scheduled_at', 'TEXT');
   await addColumnIfMissing(manager, 'campaigns', 'metrics', "TEXT DEFAULT '{}'");
   await addColumnIfMissing(manager, 'campaigns', 'recipient_ids', "TEXT DEFAULT '[]'");
-  await addColumnIfMissing(manager, 'campaigns', 'use_individual_recipients', 'INTEGER DEFAULT 0');
-  await addColumnIfMissing(manager, 'recipients', 'category', "TEXT DEFAULT ''");
+await addColumnIfMissing(manager, 'campaigns', 'use_individual_recipients', 'INTEGER DEFAULT 0');
+await addColumnIfMissing(manager, 'campaigns', 'reply_to', "TEXT DEFAULT ''");
+await addColumnIfMissing(manager, 'campaigns', 'timezone', "TEXT DEFAULT ''");
+await addColumnIfMissing(manager, 'accounts', 'reply_to', "TEXT DEFAULT ''");
+await addColumnIfMissing(manager, 'recipients', 'category', "TEXT DEFAULT ''");
 
   await manager.run(`
     CREATE TABLE IF NOT EXISTS send_settings (
